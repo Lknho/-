@@ -660,11 +660,16 @@ def split_invoice_image(pil_img, return_boxes=False):
                 return (best[0], rot_boxes)
             return best if return_boxes else best[0]
 
-        # fallback：_try_split全部失败时，直接返回整页1张（避免单张发票被过度分割）
-        # 多发票页面由candidates路径处理；确需分割可在人工确认界面手动加框
+        # fallback：单张发票，自动检测票据区域并裁剪空白边距
+        # 人工确认界面显示自动检测的裁剪框，用户确认后按此框裁剪OCR
+        cropped_img = pil_img.crop((left, top, right, bottom))
         if rotated and return_boxes:
-            return ([pil_img], [(0, 0, h, w)])
-        return ([pil_img], [(0, 0, w, h)]) if return_boxes else [pil_img]
+            # 旋转后坐标转换回原图坐标：原图宽=旋转后高(h)，原图高=旋转后宽(w)
+            orig_w = h
+            nx1, ny1 = orig_w - bottom, left
+            nx2, ny2 = orig_w - top, right
+            return ([cropped_img], [(nx1, ny1, nx2, ny2)])
+        return ([cropped_img], [(left, top, right, bottom)]) if return_boxes else [cropped_img]
     except Exception as e:
         _log_ocr_error(f"发票图像分割失败: {e}")
         return ([pil_img], []) if return_boxes else [pil_img]
