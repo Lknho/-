@@ -74,6 +74,48 @@ def test_desktop_shortcut():
     else:
         print("[SKIP] 非 Windows 平台，跳过快捷方式验证")
 
+def test_exe_integrity():
+    """验证 exe 文件存在且 PyInstaller overlay 完整"""
+    exe_path = r"D:\财务\财务管理系统.exe"
+    assert os.path.isfile(exe_path), "exe 文件不存在"
+    size = os.path.getsize(exe_path)
+    assert size > 100 * 1024 * 1024, f"exe 过小: {size} bytes (应>100MB)"
+    # 验证 PyInstaller CArchive MAGIC
+    with open(exe_path, "rb") as f:
+        # 只读末尾部分搜索 MAGIC
+        f.seek(max(0, size - 1024 * 1024))
+        tail = f.read()
+    magic = b"MEI\x0c\x0b\x0a\x0b\x0e"
+    assert magic in tail, "未找到 PyInstaller CArchive MAGIC，overlay 可能损坏"
+    print(f"[PASS] exe 完整性验证通过 ({size/1024/1024:.2f} MB, overlay 完整)")
+
+def test_exe_icon_resource():
+    """验证 exe 中包含可提取的图标资源"""
+    if sys.platform != "win32":
+        print("[SKIP] 非 Windows 平台，跳过 exe 图标验证")
+        return
+    exe_path = r"D:\财务\财务管理系统.exe"
+    assert os.path.isfile(exe_path), "exe 文件不存在"
+    import ctypes
+    from ctypes import wintypes
+    shell32 = ctypes.windll.shell32
+    shell32.ExtractIconExW.argtypes = [
+        wintypes.LPCWSTR, ctypes.c_int,
+        ctypes.POINTER(wintypes.HICON),
+        ctypes.POINTER(wintypes.HICON),
+        wintypes.UINT
+    ]
+    shell32.ExtractIconExW.restype = wintypes.UINT
+    user32 = ctypes.windll.user32
+    user32.DestroyIcon.argtypes = [wintypes.HICON]
+    n = shell32.ExtractIconExW(exe_path, -1, None, None, 0)
+    assert n > 0, "exe 中没有图标资源"
+    hicon = wintypes.HICON()
+    extracted = shell32.ExtractIconExW(exe_path, 0, ctypes.byref(hicon), None, 1)
+    assert extracted > 0 and hicon.value, "无法从 exe 提取图标"
+    user32.DestroyIcon(hicon)
+    print(f"[PASS] exe 图标资源验证通过 (可提取 {n} 个图标)")
+
 def main():
     tests = [
         test_icon_jpg_exists,
@@ -81,6 +123,8 @@ def main():
         test_icon_ico_valid,
         test_icon_ico_with_pillow,
         test_desktop_shortcut,
+        test_exe_integrity,
+        test_exe_icon_resource,
     ]
     passed = 0
     failed = 0
