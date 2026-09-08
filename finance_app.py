@@ -1604,6 +1604,19 @@ class FinanceApp(tk.Tk):
         self.geometry("1200x750")
         self.minsize(900, 600)
 
+        # 设置窗口图标（使用exe内嵌图标，最可靠）
+        try:
+            import sys as _sys
+            import os as _os
+            if getattr(_sys, 'frozen', False):
+                _icon_path = _sys.executable
+            else:
+                _icon_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'icon.ico')
+            if _os.path.exists(_icon_path):
+                self.iconbitmap(_icon_path)
+        except Exception as _e:
+            pass
+
         # 样式
         self.setup_styles()
 
