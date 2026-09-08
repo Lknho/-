@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 运行时数据
+finance.db
+finance.db.bak
+ocr_log.txt
+invoices/
+backup/
+log/
+
+# 打包产物
+dist/
+build/
+*.spec
+*.exe
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统
+Thumbs.db
+.DS_Store
+
+# 临时文件
+*.tmp
+*.temp
+_extracted/
