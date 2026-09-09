@@ -506,11 +506,59 @@ def _try_split(binary_crop, cv_img, top, left, h_gap_min, v_gap_min, min_col_rat
     if not (1 <= row_count <= 6):
         return None
 
+    # 高行二次分割：如果某行高度明显大于中位数，说明可能合并了多张发票，用更小间隙再次分割
+    if len(rows) >= 2:
+        row_heights = [y2 - y1 for y1, y2 in rows]
+        median_h = sorted(row_heights)[len(row_heights) // 2]
+        new_rows = []
+        for y1, y2 in rows:
+            rh = y2 - y1
+            if rh > median_h * 1.5 and rh > min_row_h * 1.5:
+                row_region = binary_crop[y1:y2, :]
+                sub_proj = np.sum(row_region, axis=1) / 255
+                sub_blank = sub_proj < cw * 0.002
+                sub_gaps = []
+                in_gap = False
+                gap_start = 0
+                for y in range(rh):
+                    if sub_blank[y] and not in_gap:
+                        in_gap = True
+                        gap_start = y
+                    elif not sub_blank[y] and in_gap:
+                        in_gap = False
+                        if y - gap_start >= max(5, h_gap_min // 2):
+                            sub_gaps.append((gap_start + y) // 2)
+                if sub_gaps:
+                    sub_lines = [0] + sub_gaps + [rh]
+                    added = False
+                    for si in range(len(sub_lines) - 1):
+                        sy1, sy2 = sub_lines[si], sub_lines[si + 1]
+                        if sy2 - sy1 >= min_row_h * 0.7:
+                            new_rows.append((y1 + sy1, y1 + sy2))
+                            added = True
+                    if not added:
+                        new_rows.append((y1, y2))
+                else:
+                    new_rows.append((y1, y2))
+            else:
+                new_rows.append((y1, y2))
+        rows = new_rows
+        row_count = len(rows)
+        if not (1 <= row_count <= 8):
+            return None
+
     # 每行内垂直投影分列（每行独立检测，允许行列数不一致）
     row_cols = []
     for y1, y2 in rows:
         row_region = binary_crop[y1:y2, :]
         rh, rw = row_region.shape
+        # 横向发票判断：行高明显小于行宽(横向发票)，且有实际内容，整行作为1张不分列
+        if rh < rw * 0.70:
+            col_proj_tmp = np.sum(row_region, axis=0) / 255
+            content_width = np.sum(col_proj_tmp > rh * 0.005)
+            if content_width > rw * 0.20:
+                row_cols.append([(0, rw)])
+                continue
         col_proj = np.sum(row_region, axis=0) / 255
         col_is_blank = col_proj < rh * 0.0015
         v_gaps = []
@@ -670,6 +718,8 @@ def split_invoice_image(pil_img, return_boxes=False):
             (50, 40, 0.15, 150, 80, 800),
             (40, 30, 0.12, 120, 70, 600),
             (30, 25, 0.10, 100, 60, 500),
+            (15, 20, 0.08, 80, 50, 300),
+            (10, 15, 0.06, 60, 40, 200),
         ]
 
         candidates = []
@@ -853,8 +903,8 @@ def _secondary_split_wide(images, boxes, binary, page_w, page_h, aggressive=True
             all_widths = [b[2] - b[0] for b in boxes]
             global_median = sorted(all_widths)[len(all_widths) // 2] if len(all_widths) > 1 else cur_w
             cond_v2 = len(row_indices) == 1 and len(boxes) > 1 and cur_w > global_median * 1.8 and cur_w > page_w * 0.4
-            # 宽扁框强制垂直分割（宽>页宽55% 且 高<页高60%）
-            cond_v3 = cur_w > page_w * 0.55 and cur_h < page_h * 0.60 and cur_w > page_w * 0.25
+            # 宽扁框强制垂直分割（宽>页宽55% 且 高<页高60%），排除横向小发票（高<页高20%）
+            cond_v3 = cur_w > page_w * 0.55 and cur_h < page_h * 0.60 and cur_w > page_w * 0.25 and cur_h > page_h * 0.20
             need_v_split = cond_v1 or cond_full or cond_v2 or cond_v3
             # 水平分割：1)整页单框 2)tall_h_split模式下竖长框（高>宽*1.3且同行<=2列）
             cond_tall_h = tall_h_split and cur_h > cur_w * 1.15 and len(row_indices) <= 2
@@ -11518,8 +11568,13 @@ class BatchInvoiceTab(ScrollableTab):
                         else:
                             page_split = 1
                             split_count += page_split
+                            # 单张模式也调用分割检测，自动裁剪A4中的发票区域
+                            _, single_boxes = split_invoice_image(img, return_boxes=True)
+                            if single_boxes:
+                                boxes = [single_boxes[0]]
+                            else:
+                                boxes = [(0, 0, img.size[0], img.size[1])]
                             page_details.append(f"第{page_num+1}页→1张（待确认）")
-                            boxes = [(0, 0, img.size[0], img.size[1])]
                         # 保存原图到临时位置
                         orig_name = f"pending_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_p{page_num+1}.jpg"
                         orig_path = os.path.join(INVOICE_DIR, orig_name)
@@ -11567,18 +11622,23 @@ class BatchInvoiceTab(ScrollableTab):
                         'img_size': pil_img.size,
                     })
                 else:
-                    # 一页一张：保存原图，创建全图框，进入人工确认编辑器
+                    # 一页一张：自动裁剪发票区域，进入人工确认编辑器
                     split_count = 1
+                    _, single_boxes = split_invoice_image(pil_img, return_boxes=True)
+                    if single_boxes:
+                        boxes = [single_boxes[0]]
+                    else:
+                        iw, ih = pil_img.size
+                        boxes = [(0, 0, iw, ih)]
                     page_details.append(f"第1页→1张（待确认）")
                     orig_name = f"pending_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
                     orig_path = os.path.join(INVOICE_DIR, orig_name)
                     pil_img.save(orig_path, 'JPEG', quality=92)
-                    iw, ih = pil_img.size
                     fboxes = None
                     pending_annotations.append({
                         'orig_path': orig_path,
                         'orig_name': orig_name,
-                        'boxes': [(0, 0, iw, ih)],
+                        'boxes': boxes,
                         'field_boxes': fboxes,
                         'source_file': os.path.basename(fpath),
                         'page_num': 1,
