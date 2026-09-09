@@ -7142,13 +7142,13 @@ class ImageViewer(tk.Toplevel):
         self._img_path = img_path
         self._rotation = 0
         self._invoice_id = invoice_id
-        self.minsize(500, 650)
+        self.minsize(500, 700)
         # 根据图片比例设置初始窗口大小（信息栏约120px + 控制栏约50px + 边距约30px）
         try:
             _tmp_img = Image.open(img_path)
             _iw, _ih = _tmp_img.size
             _tmp_img.close()
-            _ui_h = 350  # 信息栏+控制栏+边距总高度（确保底部按钮完整显示）
+            _ui_h = 400  # 信息栏+控制栏(两行)+边距总高度（确保底部按钮完整显示）
             _ui_w = 40   # 左右边距+滚动条
             _max_w = int(self.winfo_screenwidth() * 0.75)
             _max_h = int(self.winfo_screenheight() * 0.85)
@@ -7157,7 +7157,7 @@ class ImageViewer(tk.Toplevel):
             _avail_h = max(100, _max_h - _ui_h)
             _scale = min(_avail_w / _iw, _avail_h / _ih, 1.5)
             _init_w = max(500, int(_iw * _scale) + _ui_w)
-            _init_h = max(650, int(_ih * _scale) + _ui_h)
+            _init_h = max(700, int(_ih * _scale) + _ui_h)
             self.geometry(f"{_init_w}x{_init_h}")
             # 设置窗口初始位置：居中偏上，避免被任务栏遮挡
             _screen_w = self.winfo_screenwidth()
@@ -7166,7 +7166,7 @@ class ImageViewer(tk.Toplevel):
             _y = max(0, (_screen_h - _init_h) // 4)
             self.geometry(f"{_init_w}x{_init_h}+{_x}+{_y}")
         except Exception:
-            self.geometry("700x850")
+            self.geometry("700x900")
             _screen_w = self.winfo_screenwidth()
             _screen_h = self.winfo_screenheight()
             _x = max(0, (_screen_w - 700) // 2)
@@ -7182,16 +7182,22 @@ class ImageViewer(tk.Toplevel):
         ttk.Label(info, text=f"金额: {fmt_money(invoice_info['amount'])}").pack(anchor='w')
         ttk.Label(info, text=f"用途: {invoice_info['purpose'] or '-'}").pack(anchor='w')
 
-        # 控制栏（底部，先pack确保始终可见）
+        # 控制栏（底部，两行布局，确保窄窗口也能完整显示所有按钮）
         ctrl = ttk.Frame(self, padding=6)
         ctrl.pack(fill='x', side='bottom')
-        ttk.Button(ctrl, text="↺ 左旋90°", command=lambda: self._rotate(-90)).pack(side='left', padx=4)
-        ttk.Button(ctrl, text="↻ 右旋90°", command=lambda: self._rotate(90)).pack(side='left', padx=4)
-        ttk.Separator(ctrl, orient='vertical').pack(side='left', fill='y', padx=4)
-        ttk.Button(ctrl, text="放大", command=lambda: self._zoom(1.2)).pack(side='left', padx=4)
-        ttk.Button(ctrl, text="缩小", command=lambda: self._zoom(0.8)).pack(side='left', padx=4)
-        ttk.Button(ctrl, text="适应窗口", command=lambda: self._fit()).pack(side='left', padx=4)
-        ttk.Button(ctrl, text="关闭并保存", command=self._close_and_save).pack(side='right', padx=4)
+        # 第一行：旋转和缩放按钮
+        ctrl_row1 = ttk.Frame(ctrl)
+        ctrl_row1.pack(fill='x', pady=2)
+        ttk.Button(ctrl_row1, text="↺ 左旋90°", command=lambda: self._rotate(-90)).pack(side='left', padx=4)
+        ttk.Button(ctrl_row1, text="↻ 右旋90°", command=lambda: self._rotate(90)).pack(side='left', padx=4)
+        ttk.Separator(ctrl_row1, orient='vertical').pack(side='left', fill='y', padx=4)
+        ttk.Button(ctrl_row1, text="放大", command=lambda: self._zoom(1.2)).pack(side='left', padx=4)
+        ttk.Button(ctrl_row1, text="缩小", command=lambda: self._zoom(0.8)).pack(side='left', padx=4)
+        ttk.Button(ctrl_row1, text="适应窗口", command=lambda: self._fit()).pack(side='left', padx=4)
+        # 第二行：关闭按钮（右对齐）
+        ctrl_row2 = ttk.Frame(ctrl)
+        ctrl_row2.pack(fill='x', pady=2)
+        ttk.Button(ctrl_row2, text="关闭并保存", command=self._close_and_save).pack(side='right', padx=4)
 
         # 图片区域（中间，带水平+垂直滚动条）
         img_frame = ttk.Frame(self)
