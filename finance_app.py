@@ -506,6 +506,31 @@ def _try_split(binary_crop, cv_img, top, left, h_gap_min, v_gap_min, min_col_rat
     if not (1 <= row_count <= 8):
         return None
 
+    # 基于合并后行方向的智能合并：只合并横着的发票行（合并后行高<内容宽*0.6），不合并竖着的发票行
+    if len(rows) >= 2:
+        merged_direction = []
+        for y1, y2 in rows:
+            if merged_direction:
+                prev_y1, prev_y2 = merged_direction[-1]
+                gap = y1 - prev_y2
+                prev_h = prev_y2 - prev_y1
+                curr_h = y2 - y1
+                # 计算合并后的行高和内容宽度
+                merged_h = y2 - prev_y1
+                merged_region = binary_crop[prev_y1:y2, :]
+                merged_col_proj = np.sum(merged_region, axis=0) / 255
+                merged_content_w = np.sum(merged_col_proj > merged_h * 0.005)
+                # 只合并：间隙<80px 且 行高相似 且 合并后是横着的发票行（行高<内容宽*0.6）
+                is_horizontal_after_merge = merged_h < merged_content_w * 0.6 if merged_content_w > 0 else False
+                if gap < 80 and abs(prev_h - curr_h) < max(prev_h, curr_h) * 0.5 and is_horizontal_after_merge:
+                    merged_direction[-1] = (prev_y1, y2)
+                else:
+                    merged_direction.append((y1, y2))
+            else:
+                merged_direction.append((y1, y2))
+        rows = merged_direction
+        row_count = len(rows)
+
     # 合并过矮或内容宽度过小的行：说明是发票内部表格行，合并到相邻行
     if len(rows) >= 3:
         row_h_pre = [y2 - y1 for y1, y2 in rows]
@@ -989,8 +1014,29 @@ def _connected_component_split(binary_crop, cv_img, top, left, w, h):
             content_w = detected_w if detected_w > cw * 0.3 else cw * 0.8
             # 检测行方向：竖着的发票行（行高>内容宽*0.5）还是横着的发票行
             is_vertical_row = row_h > (content_w * 0.5) if content_w > 0 else False
-            # 基于典型发票宽度的智能强制平分
+            # 高行二次分割：同时尝试水平平分和垂直平分，选择宽高比更接近典型出租车发票(1.8)的一种
             final_cols = []
+            if row_h > 600 and content_w > 200:
+                # 估算发票数量
+                typical_w = 400
+                typical_h = 350
+                n_horizontal = max(2, round(content_w / typical_w))
+                n_horizontal = min(n_horizontal, 4)
+                n_vertical = max(2, round(row_h / typical_h))
+                n_vertical = min(n_vertical, 4)
+                # 计算两种平分方式的宽高比
+                ratio_horizontal = (content_w / n_horizontal) / row_h
+                ratio_vertical = content_w / (row_h / n_vertical)
+                # 典型出租车发票宽高比约1.4，选择更接近的一种
+                if abs(ratio_vertical - 1.8) < abs(ratio_horizontal - 1.8):
+                    # 垂直平分（横躺着的发票行）
+                    step_y = row_h / n_vertical
+                    for i in range(n_vertical):
+                        sy1 = int(row_y1 + i * step_y)
+                        sy2 = int(row_y1 + (i + 1) * step_y)
+                        boxes.append((left + max(0, content_x1 - 8), top + max(0, sy1 - 8), left + min(cw, content_x2 + 8), top + min(ch, sy2 + 8)))
+                    continue
+            # 基于典型发票宽度的智能强制平分
             if is_vertical_row and content_w > 200 and len(valid_cols) < 4:
                 # 竖着的发票行：根据行高区分发票类型
                 # 行高>650px：出租车发票（典型宽220px），否则：定额发票（典型宽500px）
