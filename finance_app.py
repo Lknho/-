@@ -995,7 +995,7 @@ def _connected_component_split(binary_crop, cv_img, top, left, w, h):
                 # 竖着的发票行：根据行高区分发票类型
                 # 行高>650px：出租车发票（典型宽220px），否则：定额发票（典型宽500px）
                 if row_h > 650:
-                    typical_w = 220
+                    typical_w = 400
                 else:
                     typical_w = 500
                 n_invoices = max(2, round(content_w / typical_w))
