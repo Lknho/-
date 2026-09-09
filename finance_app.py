@@ -11914,6 +11914,13 @@ class BatchInvoiceTab(ScrollableTab):
                             page_split = len(sub_images)
                             split_count += page_split
                             page_details.append(f"第{page_num+1}页→{page_split}张（待确认）")
+                            # 释放sub_images内存（不需要使用，只需要boxes）
+                            for _si in sub_images:
+                                try:
+                                    _si.close()
+                                except Exception:
+                                    pass
+                            sub_images = None
                         else:
                             page_split = 1
                             split_count += page_split
@@ -11929,6 +11936,8 @@ class BatchInvoiceTab(ScrollableTab):
                             else:
                                 boxes = [(0, 0, img.size[0], img.size[1])]
                             page_details.append(f"第{page_num+1}页→1张（待确认）")
+                            # 释放OpenCV图像内存
+                            del _cv_img, _gray, _binary, _contour
                         # 保存原图到临时位置
                         orig_name = f"pending_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_p{page_num+1}.jpg"
                         orig_path = os.path.join(INVOICE_DIR, orig_name)
@@ -11944,6 +11953,10 @@ class BatchInvoiceTab(ScrollableTab):
                             'default_date': default_date,
                             'img_size': img.size,
                         })
+                        # 释放图片和pixmap内存
+                        img.close()
+                        pix = None
+                        img = None
                     except Exception as pe:
                         _log_ocr_error(f"PDF第{page_num+1}页处理失败 {fpath}: {pe}")
                         page_details.append(f"第{page_num+1}页→处理失败")
@@ -11975,6 +11988,13 @@ class BatchInvoiceTab(ScrollableTab):
                         'default_date': default_date,
                         'img_size': pil_img.size,
                     })
+                    # 释放sub_images内存
+                    for _si in sub_images:
+                        try:
+                            _si.close()
+                        except Exception:
+                            pass
+                    sub_images = None
                 else:
                     # 一页一张：直接用_detect_invoice_contour检测整张发票区域，不调用split_invoice_image（会内部分割）
                     split_count = 1
@@ -12004,6 +12024,11 @@ class BatchInvoiceTab(ScrollableTab):
                         'default_date': default_date,
                         'img_size': pil_img.size,
                     })
+                    # 释放OpenCV图像内存
+                    del _cv_img, _gray, _binary, _contour
+                # 释放图片内存
+                pil_img.close()
+                pil_img = None
             except Exception as e:
                 _log_ocr_error(f"图片处理失败 {fpath}: {e}")
                 raise
@@ -12907,6 +12932,24 @@ if __name__ == '__main__':
         except Exception:
             pass
     sys.excepthook = _excepthook
+
+    # Tkinter回调异常处理（捕获after回调和事件绑定中的异常，避免闪退）
+    _orig_report_callback_exception = tk.Tk.report_callback_exception
+    def _report_callback_exception(self, exc, val, tb):
+        import traceback
+        try:
+            with open(os.path.join(get_base_dir(), 'crash_log.txt'), 'a', encoding='utf-8') as f:
+                f.write(f"[{datetime.now()}] [Tkinter回调异常]\n")
+                f.write(''.join(traceback.format_exception(exc, val, tb)))
+                f.write("\n")
+        except Exception:
+            pass
+        try:
+            LogManager.error('Tkinter回调异常', val)
+        except Exception:
+            pass
+        # 不重新抛出异常，避免程序闪退
+    tk.Tk.report_callback_exception = _report_callback_exception
 
     # === 先初始化数据库（读取主题设置需要） ===
     init_db()
