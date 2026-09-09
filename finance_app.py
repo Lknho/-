@@ -6319,7 +6319,7 @@ class PrintLayoutEditor(tk.Toplevel):
             return
         shorts = [min(self.items[i]['ow'], self.items[i]['oh']) for i in range(n)]
         aspects = [self.items[i]['aspect'] for i in range(n)]  # ow/oh
-        large_g = [i for i in range(n) if aspects[i] >= 0.55 and shorts[i] >= 1100]
+        large_g = [i for i in range(n) if aspects[i] >= 0.55 and shorts[i] >= 800]
         large_set = set(large_g)
         rest1 = [i for i in range(n) if i not in large_set]
         # 竖版中票（增值税普通发票等竖版较大发票）：一页2张竖放
@@ -6425,33 +6425,42 @@ class PrintLayoutEditor(tk.Toplevel):
                 pages.append(page)
             return pages
         # ---- 中票：每页6张，2行×3列竖排（不旋转），每张约半页高，填满整页 ----
-        maxw = (1.0 - 4 * GAP) / 3.0
-        half_h = (page_h_ratio - 3 * GAP) / 2.0
+        # 数量不足6张时动态调整：<=2张每页2张上下排列，3-4张每行2张，5-6张2行×3列
         for start in range(0, len(indices), 6):
             group = indices[start:start + 6]
+            cnt = len(group)
+            # 根据数量决定行列数
+            if cnt <= 2:
+                cols, rows = 1, 2
+            elif cnt <= 4:
+                cols, rows = 2, 2
+            else:
+                cols, rows = 3, 2
+            maxw = (1.0 - (cols + 1) * GAP) / cols
+            rowh = (page_h_ratio - (rows + 1) * GAP) / rows
             info = []
             for idx in group:
                 item = self.items[idx]
                 rotation = 0
                 aspect = item['aspect']
-                if aspect < 0.35:   # 极窄长才旋转，避免压扁
+                if aspect < 0.35:
                     rotation = 90
                     aspect = 1.0 / aspect
-                h = half_h
+                h = rowh
                 w = h * aspect
                 if w > maxw:
                     w = maxw
                     h = w / aspect
                 info.append((idx, w, h, rotation))
             page = []
-            for row in range(2):
-                y = GAP + row * (half_h + GAP)
-                for col in range(3):
-                    n = row * 3 + col
+            for row in range(rows):
+                y = GAP + row * (rowh + GAP)
+                for col in range(cols):
+                    n = row * cols + col
                     if n >= len(info):
                         break
                     idx, w, h, rotation = info[n]
-                    x = GAP + col * (maxw + GAP)
+                    x = GAP + col * (maxw + GAP) + (maxw - w) / 2
                     page.append({'idx': idx, 'x': x, 'y': y,
                                  'w': w, 'h': h, 'rotation': rotation})
             pages.append(page)
