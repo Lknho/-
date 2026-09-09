@@ -13013,7 +13013,7 @@ if __name__ == '__main__':
 
     # === 启动界面 ===
     splash = tk.Tk()
-    splash.attributes('-alpha', 0.0)  # 完全透明，避免创建时闪白色
+    splash.withdraw()  # 立即隐藏窗口，这是避免闪白的关键
     splash.overrideredirect(True)
     splash_width = 460
     splash_height = 280
@@ -13024,6 +13024,7 @@ if __name__ == '__main__':
     splash.geometry(f"{splash_width}x{splash_height}+{x}+{y}")
     splash.configure(bg=_sp_bg)
     splash.attributes('-topmost', True)
+    splash.attributes('-alpha', 0.0)  # 完全透明，deiconify后不会闪白
 
     # 启动界面内容
     splash_frame = tk.Frame(splash, bg=_sp_bg, width=splash_width, height=splash_height)
@@ -13054,10 +13055,13 @@ if __name__ == '__main__':
     tk.Label(splash_frame, text="v1.0", font=('微软雅黑', 8),
              bg=_sp_bg, fg=_sp_version_fg).pack(side='bottom', pady=10)
 
-    # 所有控件创建完成后，使用淡入效果显示窗口，彻底避免闪白色
+    # 所有控件创建完成后，先deiconify（此时已完全透明，不会闪白），再淡入
     splash.update_idletasks()
     splash.update()
-    # 淡入效果：从0.0逐步增加到1.0
+    splash.deiconify()  # 显示窗口，此时-alpha=0.0完全透明
+    splash.update_idletasks()
+    splash.update()
+    # 淡入效果：从0.1逐步增加到1.0
     for _alpha in [i / 10.0 for i in range(1, 11)]:
         splash.attributes('-alpha', _alpha)
         splash.update_idletasks()
