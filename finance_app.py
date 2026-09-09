@@ -549,6 +549,23 @@ def _try_split(binary_crop, cv_img, top, left, h_gap_min, v_gap_min, min_col_rat
         if not (1 <= row_count <= 8):
             return None
 
+    # 高行二次分割后，检查是否还有异常偏高的行，强制上下平分
+    if len(rows) >= 3:
+        row_h_final = [y2 - y1 for y1, y2 in rows]
+        median_final = sorted(row_h_final)[len(row_h_final) // 2]
+        if median_final > 100:
+            final_rows = []
+            for y1, y2 in rows:
+                rh = y2 - y1
+                if rh > median_final * 1.3 and rh > 200:
+                    mid_y = (y1 + y2) // 2
+                    final_rows.append((y1, mid_y))
+                    final_rows.append((mid_y, y2))
+                else:
+                    final_rows.append((y1, y2))
+            rows = final_rows
+            row_count = len(rows)
+
     # 每行内垂直投影分列（每行独立检测，允许行列数不一致）
     row_cols = []
     for y1, y2 in rows:

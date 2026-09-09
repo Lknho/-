@@ -68,7 +68,7 @@ def test_multi_taxi_file2():
     return True
 
 def test_multi_taxi_file3():
-    """一页多张：打车发票(3).pdf识别5-6张（第2+3张间隙小）"""
+    """一页多张：打车发票(3).pdf正确识别6张横向发票（强制平分合并行）"""
     pdf_path = r'C:\Users\waiter\Desktop\李堃煌\23\9月\汇总\9月份打车发票2 (3).pdf'
     if not os.path.exists(pdf_path):
         print(f'  跳过: 文件不存在')
@@ -76,12 +76,13 @@ def test_multi_taxi_file3():
     img = pdf_to_image_200dpi(pdf_path, 0)
     result, boxes = split_invoice_image(img, return_boxes=True)
     print(f'  打车发票(3).pdf: 识别出{len(boxes)}张')
-    # 第2+3张之间间隙极小，可能合并为1张，所以5-6张都可接受
-    assert 5 <= len(boxes) <= 6, f'期望5-6张，实际{len(boxes)}张'
+    assert len(boxes) == 6, f'期望6张，实际{len(boxes)}张'
     for i, box in enumerate(boxes):
         x1, y1, x2, y2 = box
         w, h = x2-x1, y2-y1
         print(f'    第{i+1}张: {w}x{h}')
+        assert w > h, f'第{i+1}张应该是横向发票(宽>高)，实际{w}x{h}'
+        assert w > 800, f'第{i+1}张宽度应该>800，实际{w}'
     return True
 
 if __name__ == '__main__':
