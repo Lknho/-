@@ -3737,7 +3737,7 @@ class InvoiceTab(ScrollableTab):
         month_options = ['全部'] + [f"{m:02d}" for m in range(1, 13)]
         ttk.Combobox(filter_row1, textvariable=self.filter_month, values=month_options,
                      width=6, state='readonly').pack(side='left', padx=4)
-        # 第二行：排版、报销人、应用筛选按钮
+        # 第二行：排版、报销人、发票号搜索、应用筛选按钮
         filter_row2 = ttk.Frame(filter_frame)
         filter_row2.pack(fill='x', pady=2)
         ttk.Label(filter_row2, text="排版:").pack(side='left', padx=4)
@@ -3748,6 +3748,11 @@ class InvoiceTab(ScrollableTab):
         self.filter_person = tk.StringVar(value='全部')
         self.filter_person_cb = ttk.Combobox(filter_row2, textvariable=self.filter_person, width=12, state='readonly')
         self.filter_person_cb.pack(side='left', padx=4)
+        ttk.Label(filter_row2, text="发票号:").pack(side='left', padx=4)
+        self.filter_invoice_no = tk.StringVar()
+        self.filter_invoice_no_entry = ttk.Entry(filter_row2, textvariable=self.filter_invoice_no, width=18)
+        self.filter_invoice_no_entry.pack(side='left', padx=4)
+        self.filter_invoice_no_entry.bind('<Return>', lambda e: self.refresh())
         ttk.Button(filter_row2, text="应用筛选", command=self.refresh).pack(side='left', padx=4)
 
         # 表格
@@ -3897,6 +3902,9 @@ class InvoiceTab(ScrollableTab):
             sql += " AND COALESCE(i.printed,0)=0"
         elif self.filter_printed.get() == '已排版':
             sql += " AND i.printed=1"
+        if hasattr(self, 'filter_invoice_no') and self.filter_invoice_no.get().strip():
+            sql += " AND i.invoice_number LIKE ?"
+            params.append(f"%{self.filter_invoice_no.get().strip()}%")
         sql += " ORDER BY i.invoice_date ASC, i.id ASC"
         rows = conn.execute(sql, params).fetchall()
         conn.close()
@@ -12973,6 +12981,7 @@ if __name__ == '__main__':
 
     # === 启动界面 ===
     splash = tk.Tk()
+    splash.withdraw()  # 先隐藏窗口，避免创建时闪白色
     splash.overrideredirect(True)
     splash_width = 460
     splash_height = 280
@@ -13012,6 +13021,10 @@ if __name__ == '__main__':
 
     tk.Label(splash_frame, text="v1.0", font=('微软雅黑', 8),
              bg=_sp_bg, fg=_sp_version_fg).pack(side='bottom', pady=10)
+
+    # 所有控件创建完成后再显示窗口，避免闪白色
+    splash.update_idletasks()
+    splash.deiconify()
 
     def update_splash(val, text):
         progress['value'] = val
