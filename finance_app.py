@@ -9447,7 +9447,7 @@ class AnnotationEditor(tk.Toplevel):
         for field_name, label, color in self.FIELD_TYPES:
             btn = ttk.Button(self.toolbar, text=f"🟢{label}", command=lambda f=field_name: self.add_field_box(f))
             self.field_buttons[field_name] = btn
-        ttk.Button(self.toolbar, text="删除该识别框", command=self.delete_invoice_fields)
+        ttk.Button(self.toolbar, text="删除选中字段框", command=self.delete_invoice_fields)
         ttk.Button(self.toolbar, text="清除本页框", command=self.clear_field_boxes)
         ttk.Label(self.toolbar, text="💡 顶点=斜调 边中点=整条边 框内=移动",
                  foreground='#FFD60A', font=('微软雅黑', 9))
@@ -9885,20 +9885,19 @@ class AnnotationEditor(tk.Toplevel):
         self.redraw()
 
     def delete_invoice_fields(self):
-        """删除当前选中发票（红框）的所有识别框（绿框），不影响其他发票"""
+        """删除当前选中的那个字段识别框（绿框），只删选中的，不删其他字段框"""
         ann = self.annotations[self.current_idx]
-        if self.selected_box < 0 or self.selected_box >= len(ann.get('boxes', [])):
-            if len(ann.get('boxes', [])) > 0:
-                self.selected_box = 0
-            else:
-                messagebox.showinfo("提示", "没有可选择的发票框")
-                return
-        box_idx = self.selected_box
+        # 必须先选中一个字段框（绿框）
+        if self.selected_field is None:
+            messagebox.showinfo("提示", "请先点击选中要删除的字段框（绿框），再点击此按钮")
+            return
+        box_idx, field_name = self.selected_field
         if 'field_boxes' not in ann or len(ann['field_boxes']) <= box_idx:
             return
-        for k in ann['field_boxes'][box_idx]:
-            ann['field_boxes'][box_idx][k] = None
+        # 只删除选中的那个字段框
+        ann['field_boxes'][box_idx][field_name] = None
         self.selected_field = None
+        self._update_info_panel()
         self.redraw()
 
     def auto_recognize_fields(self):
