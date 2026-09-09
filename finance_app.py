@@ -854,6 +854,12 @@ def split_invoice_image(pil_img, return_boxes=False):
                 if len(new_best[0]) == len(best[0]):
                     break
                 best = new_best
+            # 连通区域分析核对：投影法结果很少（<=4张）时，用连通区域法核对
+            if len(best[0]) <= 4:
+                cc_ret = _connected_component_split(binary_crop, cv_img, top, left, w, h)
+                if cc_ret and len(cc_ret[0]) > len(best[0]) and len(cc_ret[0]) <= 16:
+                    # 连通区域法结果更多，用它替换投影法结果
+                    best = cc_ret
             # 横向页面：旋转坐标回来
             if rotated and return_boxes:
                 orig_w, orig_h = h, w
@@ -881,6 +887,126 @@ def split_invoice_image(pil_img, return_boxes=False):
     except Exception as e:
         _log_ocr_error(f"发票图像分割失败: {e}")
         return ([pil_img], []) if return_boxes else [pil_img]
+
+
+def _connected_component_split(binary_crop, cv_img, top, left, w, h):
+    """连通区域分析法分割发票：检测所有连通区域，按y间隙分行、按x间隙分列，
+    每组的外接矩形就是一张发票的边界框。用于与投影法核对，提高紧密排列发票的识别准确率。
+    分割失败返回None。"""
+    try:
+        import cv2
+        import numpy as np
+        from PIL import Image
+
+        ch, cw = binary_crop.shape
+        if ch < 100 or cw < 100:
+            return None
+
+        # 形态学膨胀：填充发票内部小间隙
+        kernel = np.ones((15, 15), np.uint8)
+        binary_dilated = cv2.dilate(binary_crop, kernel, iterations=1)
+
+        # 连通区域检测
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary_dilated, connectivity=8)
+
+        # 收集连通区域（过滤极小噪声）
+        components = []
+        for i in range(1, num_labels):
+            x, y, comp_w, comp_h, area = stats[i]
+            if area >= 500:
+                components.append((x, y, x + comp_w, y + comp_h))
+
+        if len(components) < 2:
+            return None
+
+        # 第一步：按y中心间隙分行
+        components.sort(key=lambda c: (c[1] + c[3]) / 2)
+        y_centers = [(c[1] + c[3]) / 2 for c in components]
+        # 检测y中心间隙：大于页高8%的间隙作为分行边界
+        y_gaps = []
+        for i in range(1, len(y_centers)):
+            gap = y_centers[i] - y_centers[i - 1]
+            if gap > ch * 0.05:
+                y_gaps.append(i)
+        # 分行
+        rows = []
+        prev_idx = 0
+        for gap_idx in y_gaps:
+            rows.append(components[prev_idx:gap_idx])
+            prev_idx = gap_idx
+        rows.append(components[prev_idx:])
+        # 过滤空行和只有1个区域的行（可能是噪声）
+        rows = [r for r in rows if len(r) >= 1]
+
+        if len(rows) < 1:
+            return None
+
+        # 第二步：每行内按x中心间隙分列
+        boxes = []
+        for row in rows:
+            if len(row) == 0:
+                continue
+            row.sort(key=lambda c: (c[0] + c[2]) / 2)
+            x_centers = [(c[0] + c[2]) / 2 for c in row]
+            # 检测x中心间隙：大于页宽8%的间隙作为分列边界
+            x_gaps = []
+            for i in range(1, len(x_centers)):
+                gap = x_centers[i] - x_centers[i - 1]
+                if gap > cw * 0.05:
+                    x_gaps.append(i)
+            # 分列
+            cols = []
+            prev_idx = 0
+            for gap_idx in x_gaps:
+                cols.append(row[prev_idx:gap_idx])
+                prev_idx = gap_idx
+            cols.append(row[prev_idx:])
+            # 每列的外接矩形就是一张发票
+            for col in cols:
+                if len(col) == 0:
+                    continue
+                x1 = min(c[0] for c in col)
+                y1 = min(c[1] for c in col)
+                x2 = max(c[2] for c in col)
+                y2 = max(c[3] for c in col)
+                # 扩展边界8px
+                x1 = max(0, x1 - 8)
+                y1 = max(0, y1 - 8)
+                x2 = min(cw, x2 + 8)
+                y2 = min(ch, y2 + 8)
+                boxes.append((left + x1, top + y1, left + x2, top + y2))
+
+        if len(boxes) < 2:
+            return None
+        if len(boxes) > 16:
+            return None
+
+        # 过滤太小的框
+        valid_boxes = []
+        for x1, y1, x2, y2 in boxes:
+            if (x2 - x1) >= w * 0.06 and (y2 - y1) >= h * 0.06:
+                if (x2 - x1) * (y2 - y1) >= w * h * 0.02:
+                    valid_boxes.append((x1, y1, x2, y2))
+
+        if len(valid_boxes) < 2:
+            return None
+
+        # 生成裁剪图片
+        result = []
+        final_boxes = []
+        for x1, y1, x2, y2 in valid_boxes:
+            crop_cv = cv_img[y1:y2, x1:x2]
+            if crop_cv.size == 0:
+                continue
+            result.append(Image.fromarray(cv2.cvtColor(crop_cv, cv2.COLOR_BGR2RGB)))
+            final_boxes.append((x1, y1, x2, y2))
+
+        if len(result) < 2:
+            return None
+
+        return (result, final_boxes)
+    except Exception as e:
+        return None
 
 
 def _find_inner_v_gap(region, min_gap=5, margin_ratio=0.10):
