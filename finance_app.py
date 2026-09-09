@@ -7148,7 +7148,7 @@ class ImageViewer(tk.Toplevel):
             _tmp_img = Image.open(img_path)
             _iw, _ih = _tmp_img.size
             _tmp_img.close()
-            _ui_h = 260  # 信息栏+控制栏+边距总高度（确保底部按钮完整显示）
+            _ui_h = 300  # 信息栏+控制栏+边距总高度（确保底部按钮完整显示）
             _ui_w = 40   # 左右边距+滚动条
             _max_w = int(self.winfo_screenwidth() * 0.75)
             _max_h = int(self.winfo_screenheight() * 0.85)
@@ -7157,10 +7157,21 @@ class ImageViewer(tk.Toplevel):
             _avail_h = max(100, _max_h - _ui_h)
             _scale = min(_avail_w / _iw, _avail_h / _ih, 1.5)
             _init_w = max(420, int(_iw * _scale) + _ui_w)
-            _init_h = max(520, int(_ih * _scale) + _ui_h)
+            _init_h = max(600, int(_ih * _scale) + _ui_h)
             self.geometry(f"{_init_w}x{_init_h}")
+            # 设置窗口初始位置：居中偏上，避免被任务栏遮挡
+            _screen_w = self.winfo_screenwidth()
+            _screen_h = self.winfo_screenheight()
+            _x = max(0, (_screen_w - _init_w) // 2)
+            _y = max(0, (_screen_h - _init_h) // 4)
+            self.geometry(f"{_init_w}x{_init_h}+{_x}+{_y}")
         except Exception:
             self.geometry("700x800")
+            _screen_w = self.winfo_screenwidth()
+            _screen_h = self.winfo_screenheight()
+            _x = max(0, (_screen_w - 700) // 2)
+            _y = max(0, (_screen_h - 800) // 4)
+            self.geometry(f"700x800+{_x}+{_y}")
 
         # 信息栏（顶部）
         info = ttk.Frame(self, padding=8)
