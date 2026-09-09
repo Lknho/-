@@ -941,39 +941,70 @@ def _connected_component_split(binary_crop, cv_img, top, left, w, h):
         if len(rows) < 1:
             return None
 
-        # 第二步：每行内按x中心间隙分列
+        # 第二步：每行内用投影法分列（能检测更小的间隙）
         boxes = []
         for row in rows:
             if len(row) == 0:
                 continue
-            row.sort(key=lambda c: (c[0] + c[2]) / 2)
-            x_centers = [(c[0] + c[2]) / 2 for c in row]
-            # 检测x中心间隙：大于页宽8%的间隙作为分列边界
-            x_gaps = []
-            for i in range(1, len(x_centers)):
-                gap = x_centers[i] - x_centers[i - 1]
-                if gap > cw * 0.05:
-                    x_gaps.append(i)
-            # 分列
+            # 计算行的y范围
+            row_y1 = min(c[1] for c in row)
+            row_y2 = max(c[3] for c in row)
+            row_h = row_y2 - row_y1
+            # 提取行区域的原始二值图像（不使用膨胀后的，避免填充间隙）
+            row_binary = binary_crop[row_y1:row_y2, :]
+            # 水平投影（每列的白色像素数）
+            col_proj = np.sum(row_binary, axis=0) / 255
+            # 检测有内容的列（降低阈值，能检测更小的间隙）
+            col_has = col_proj > row_h * 0.002
+            # 找连续有内容的段
             cols = []
-            prev_idx = 0
-            for gap_idx in x_gaps:
-                cols.append(row[prev_idx:gap_idx])
-                prev_idx = gap_idx
-            cols.append(row[prev_idx:])
-            # 每列的外接矩形就是一张发票
-            for col in cols:
-                if len(col) == 0:
-                    continue
-                x1 = min(c[0] for c in col)
-                y1 = min(c[1] for c in col)
-                x2 = max(c[2] for c in col)
-                y2 = max(c[3] for c in col)
+            in_col = False
+            col_start = 0
+            for x in range(cw):
+                if col_has[x] and not in_col:
+                    col_start = x
+                    in_col = True
+                elif not col_has[x] and in_col:
+                    cols.append((col_start, x))
+                    in_col = False
+            if in_col:
+                cols.append((col_start, cw))
+            # 合并过窄的间隙（<8px的间隙合并）
+            merged_cols = []
+            for cx1, cx2 in cols:
+                if merged_cols and cx1 - merged_cols[-1][1] < 8:
+                    merged_cols[-1] = (merged_cols[-1][0], cx2)
+                else:
+                    merged_cols.append((cx1, cx2))
+            # 过滤过窄的列
+            valid_cols = [(cx1, cx2) for cx1, cx2 in merged_cols if (cx2 - cx1) >= cw * 0.05]
+            # 计算平均宽度
+            if valid_cols:
+                avg_w = sum(cx2 - cx1 for cx1, cx2 in valid_cols) / len(valid_cols)
+            else:
+                avg_w = 0
+            # 强制平分：宽度明显大于平均宽度的列可能合并了多张发票
+            final_cols = []
+            for cx1, cx2 in valid_cols:
+                col_w = cx2 - cx1
+                if avg_w > 0 and col_w > avg_w * 1.5 and col_w > 200:
+                    # 计算应该分成几张
+                    n_split = max(2, round(col_w / avg_w))
+                    n_split = min(n_split, 4)
+                    step = col_w / n_split
+                    for i in range(n_split):
+                        sx1 = int(cx1 + i * step)
+                        sx2 = int(cx1 + (i + 1) * step)
+                        final_cols.append((sx1, sx2))
+                else:
+                    final_cols.append((cx1, cx2))
+            # 每列就是一张发票
+            for cx1, cx2 in final_cols:
                 # 扩展边界8px
-                x1 = max(0, x1 - 8)
-                y1 = max(0, y1 - 8)
-                x2 = min(cw, x2 + 8)
-                y2 = min(ch, y2 + 8)
+                x1 = max(0, cx1 - 8)
+                y1 = max(0, row_y1 - 8)
+                x2 = min(cw, cx2 + 8)
+                y2 = min(ch, row_y2 + 8)
                 boxes.append((left + x1, top + y1, left + x2, top + y2))
 
         if len(boxes) < 2:
