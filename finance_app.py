@@ -13013,7 +13013,7 @@ if __name__ == '__main__':
 
     # === 启动界面 ===
     splash = tk.Tk()
-    splash.withdraw()  # 先隐藏窗口，避免创建时闪白色
+    splash.attributes('-alpha', 0.0)  # 完全透明，避免创建时闪白色
     splash.overrideredirect(True)
     splash_width = 460
     splash_height = 280
@@ -13054,9 +13054,14 @@ if __name__ == '__main__':
     tk.Label(splash_frame, text="v1.0", font=('微软雅黑', 8),
              bg=_sp_bg, fg=_sp_version_fg).pack(side='bottom', pady=10)
 
-    # 所有控件创建完成后再显示窗口，避免闪白色
+    # 所有控件创建完成后，使用淡入效果显示窗口，彻底避免闪白色
     splash.update_idletasks()
-    splash.deiconify()
+    splash.update()
+    # 淡入效果：从0.0逐步增加到1.0
+    for _alpha in [i / 10.0 for i in range(1, 11)]:
+        splash.attributes('-alpha', _alpha)
+        splash.update_idletasks()
+        splash.update()
 
     def update_splash(val, text):
         progress['value'] = val
@@ -13077,6 +13082,10 @@ if __name__ == '__main__':
     update_splash(35, "正在加载界面组件...")
     app = FinanceApp()
     app.withdraw()
+    try:
+        app.attributes('-alpha', 0.0)  # 完全透明，避免创建时闪白色
+    except Exception:
+        pass
 
     update_splash(65, "正在加载业务数据...")
     app.update_idletasks()
@@ -13110,6 +13119,16 @@ if __name__ == '__main__':
     app.minsize(1150, 760)
     app.lift()
     app.focus_force()
+    # 主窗口淡入显示，避免闪白色
+    app.update_idletasks()
+    app.update()
+    for _alpha in [i / 10.0 for i in range(1, 11)]:
+        try:
+            app.attributes('-alpha', _alpha)
+            app.update_idletasks()
+            app.update()
+        except Exception:
+            break
     try:
         app.mainloop()
     finally:
