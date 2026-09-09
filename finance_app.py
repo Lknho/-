@@ -503,8 +503,30 @@ def _try_split(binary_crop, cv_img, top, left, h_gap_min, v_gap_min, min_col_rat
         if y2 - y1 >= min_row_h:
             rows.append((y1, y2))
     row_count = len(rows)
-    if not (1 <= row_count <= 6):
+    if not (1 <= row_count <= 8):
         return None
+
+    # 合并过矮或内容宽度过小的行：说明是发票内部表格行，合并到相邻行
+    if len(rows) >= 3:
+        row_h_pre = [y2 - y1 for y1, y2 in rows]
+        median_h_pre = sorted(row_h_pre)[len(row_h_pre) // 2]
+        merged_rows = []
+        for y1, y2 in rows:
+            rh_check = y2 - y1
+            row_region_check = binary_crop[y1:y2, :]
+            _, rw_check = row_region_check.shape
+            col_proj_check = np.sum(row_region_check, axis=0) / 255
+            content_w_check = np.sum(col_proj_check > rh_check * 0.005)
+            # 行高<中位数*0.7 或 内容宽度<行宽*50%，都合并到相邻行
+            is_short = rh_check < median_h_pre * 0.7
+            is_narrow = content_w_check < rw_check * 0.50
+            if (is_short or is_narrow) and merged_rows:
+                prev_y1, prev_y2 = merged_rows[-1]
+                merged_rows[-1] = (prev_y1, y2)
+            else:
+                merged_rows.append((y1, y2))
+        rows = merged_rows
+        row_count = len(rows)
 
     # 高行二次分割：如果某行高度明显大于中位数，说明可能合并了多张发票，用更小间隙再次分割
     if len(rows) >= 2:
@@ -580,6 +602,9 @@ def _try_split(binary_crop, cv_img, top, left, h_gap_min, v_gap_min, min_col_rat
                 continue
         col_proj = np.sum(row_region, axis=0) / 255
         col_is_blank = col_proj < rh * 0.0015
+        # 纵向发票行（行高>行宽*0.5）使用更小的分列间隙，检测紧密排列的发票
+        is_vertical_row = rh > rw * 0.5
+        effective_v_gap = 5 if is_vertical_row else v_gap_min
         v_gaps = []
         in_gap = False
         gap_start = 0
@@ -589,18 +614,35 @@ def _try_split(binary_crop, cv_img, top, left, h_gap_min, v_gap_min, min_col_rat
                 gap_start = x
             elif not col_is_blank[x] and in_gap:
                 in_gap = False
-                if x - gap_start >= v_gap_min:
+                if x - gap_start >= effective_v_gap:
                     v_gaps.append((gap_start + x) // 2)
         v_lines = [0] + v_gaps + [rw]
         cols = []
         for i in range(len(v_lines) - 1):
             col_w = v_lines[i + 1] - v_lines[i]
-            # 列宽至少占行宽15%，防止过度分割出太窄的列
-            if col_w >= rw * max(min_col_ratio, 0.15):
+            # 纵向发票行列宽要求更低（10%），其他行保持15%
+            min_col_w_ratio = 0.10 if is_vertical_row else max(min_col_ratio, 0.15)
+            if col_w >= rw * min_col_w_ratio:
                 cols.append((v_lines[i], v_lines[i + 1]))
+        # 纵向发票行：合并过窄的假列（宽度<中位数*0.6）
+        if is_vertical_row and len(cols) >= 3:
+            col_widths = [c2 - c1 for c1, c2 in cols]
+            median_col_w = sorted(col_widths)[len(col_widths) // 2]
+            if median_col_w > 100:
+                merged_cols = []
+                for c1, c2 in cols:
+                    cw = c2 - c1
+                    if cw < median_col_w * 0.6 and merged_cols:
+                        # 合并到上一列
+                        prev_c1, prev_c2 = merged_cols[-1]
+                        merged_cols[-1] = (prev_c1, c2)
+                    else:
+                        merged_cols.append((c1, c2))
+                cols = merged_cols
         if cols:
-            # 宽高比检查：如果同行有多列且每列都是纵向(高>宽)，说明是误分割，合并为整行
-            if len(cols) >= 2:
+            # 宽高比检查：仅对横向发票行（行高<行宽*0.5）检查，如果多列且每列都是纵向说明是误分割
+            # 纵向发票行（行高>行宽*0.5）不检查，因为每列确实是纵向的
+            if len(cols) >= 2 and rh < rw * 0.5:
                 row_h = y2 - y1
                 all_vertical = all((c[1] - c[0]) < row_h for c in cols)
                 if all_vertical:
