@@ -2074,6 +2074,16 @@ class FlatCheckbutton(tk.Frame):
 class FinanceApp(tk.Tk):
     def __init__(self):
         super().__init__()
+        # 立即隐藏窗口，避免初始化期间显示白色
+        self.withdraw()
+        # 设置背景色，避免显示白色
+        try:
+            if self.get_current_theme() == 'dark':
+                self.configure(bg='#000000')
+            else:
+                self.configure(bg='#E6E7E8')
+        except Exception:
+            self.configure(bg='#E6E7E8')
         # 关键：将默认root设为自己，确保所有StringVar绑定到app而非splash
         tk._default_root = self
         self.title("财务管理系统")
@@ -13106,9 +13116,17 @@ if __name__ == '__main__':
     splash.after(200)
     splash.update()
 
-    # 关闭启动界面，显示主窗口
+    # 确保启动界面完全关闭后再显示主窗口
     try:
+        splash.update_idletasks()
+        splash.update()
         splash.destroy()
+    except Exception:
+        pass
+    # 等待一下，确保启动界面完全销毁
+    try:
+        app.update_idletasks()
+        app.update()
     except Exception:
         pass
     # 恢复默认root窗口（splash作为第一个Tk曾是默认root，销毁后需指定app为默认root）
@@ -13117,6 +13135,11 @@ if __name__ == '__main__':
     except Exception:
         pass
 
+    # 确保主窗口是完全透明的，然后再显示
+    try:
+        app.attributes('-alpha', 0.0)
+    except Exception:
+        pass
     app.deiconify()
     app.title("财务管理系统")
     app.geometry("1280x820")
