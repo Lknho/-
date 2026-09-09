@@ -978,26 +978,47 @@ def _connected_component_split(binary_crop, cv_img, top, left, w, h):
                     merged_cols.append((cx1, cx2))
             # 过滤过窄的列
             valid_cols = [(cx1, cx2) for cx1, cx2 in merged_cols if (cx2 - cx1) >= cw * 0.05]
-            # 计算平均宽度
+            # 计算行的内容范围（使用max(检测宽度, 行宽80%)，避免稀疏内容导致估算偏少）
             if valid_cols:
-                avg_w = sum(cx2 - cx1 for cx1, cx2 in valid_cols) / len(valid_cols)
+                content_x1 = min(cx1 for cx1, cx2 in valid_cols)
+                content_x2 = max(cx2 for cx1, cx2 in valid_cols)
+                detected_w = content_x2 - content_x1
             else:
-                avg_w = 0
-            # 强制平分：宽度明显大于平均宽度的列可能合并了多张发票
+                content_x1 = content_x2 = 0
+                detected_w = 0
+            content_w = max(detected_w, cw * 0.8)
+            # 检测行方向：竖着的发票行（行高>内容宽*0.5）还是横着的发票行
+            is_vertical_row = row_h > (content_w * 0.5) if content_w > 0 else False
+            # 基于典型发票宽度的智能强制平分
             final_cols = []
-            for cx1, cx2 in valid_cols:
-                col_w = cx2 - cx1
-                if avg_w > 0 and col_w > avg_w * 1.5 and col_w > 200:
-                    # 计算应该分成几张
-                    n_split = max(2, round(col_w / avg_w))
-                    n_split = min(n_split, 4)
-                    step = col_w / n_split
-                    for i in range(n_split):
-                        sx1 = int(cx1 + i * step)
-                        sx2 = int(cx1 + (i + 1) * step)
-                        final_cols.append((sx1, sx2))
+            if is_vertical_row and content_w > 200 and len(valid_cols) < 4:
+                # 竖着的发票行：根据行高区分发票类型
+                # 行高>650px：出租车发票（典型宽220px），否则：定额发票（典型宽500px）
+                if row_h > 650:
+                    typical_w = 220
                 else:
-                    final_cols.append((cx1, cx2))
+                    typical_w = 500
+                n_invoices = max(2, round(content_w / typical_w))
+                n_invoices = min(n_invoices, 6)
+                # 强制平分整个行的内容范围
+                step = content_w / n_invoices
+                for i in range(n_invoices):
+                    sx1 = int(content_x1 + i * step)
+                    sx2 = int(content_x1 + (i + 1) * step)
+                    final_cols.append((sx1, sx2))
+            elif not is_vertical_row and content_w > 300 and len(valid_cols) < 3:
+                # 横着的发票行：典型发票宽度约400px，估算发票数量
+                typical_w = 400
+                n_invoices = max(2, round(content_w / typical_w))
+                n_invoices = min(n_invoices, 4)
+                step = content_w / n_invoices
+                for i in range(n_invoices):
+                    sx1 = int(content_x1 + i * step)
+                    sx2 = int(content_x1 + (i + 1) * step)
+                    final_cols.append((sx1, sx2))
+            else:
+                # 正常情况：使用检测到的列
+                final_cols = valid_cols
             # 每列就是一张发票
             for cx1, cx2 in final_cols:
                 # 扩展边界8px
