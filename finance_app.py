@@ -9908,28 +9908,11 @@ class AnnotationEditor(tk.Toplevel):
         box_idx, field_name = self.selected_field
         if 'field_boxes' not in ann or len(ann['field_boxes']) <= box_idx:
             return
-        # 先保存要删除的元素ID，再清除选中状态
-        _elem_ids = list(self._field_element_ids.get((box_idx, field_name), []))
-        # 只删除选中的那个字段框的数据
+        # 只删除选中的那个字段框的数据（和clear_field_boxes一样的逻辑）
         ann['field_boxes'][box_idx][field_name] = None
         self.selected_field = None
-        # 从字典中移除
-        if (box_idx, field_name) in self._field_element_ids:
-            del self._field_element_ids[(box_idx, field_name)]
-        self._update_info_panel()
-        # 关键：直接按元素ID删除Canvas上的元素，不需要重绘整个Canvas
-        # 这样可以避免重绘时序问题，字段框会立即消失
-        try:
-            for _id in _elem_ids:
-                self.canvas.delete(_id)
-            self.canvas.update_idletasks()
-            self.canvas.update()
-        except Exception as e:
-            # 如果删除失败，回退到完整重绘
-            _log_ocr_error(f"删除字段框元素失败，回退到重绘: {e}")
-            self.redraw()
-            self.update_idletasks()
-            self.update()
+        # 和clear_field_boxes完全一样：直接调用redraw()，不做任何额外操作
+        self.redraw()
 
     def auto_recognize_fields(self):
         """对当前页所有发票自动OCR识别发票号/日期/金额并生成绿框（后台线程，避免卡顿）"""
