@@ -560,6 +560,74 @@ def _try_split(binary_crop, cv_img, top, left, h_gap_min, v_gap_min, min_col_rat
     return (result, boxes) if len(result) >= 2 else None
 
 
+
+def _detect_invoice_contour(cv_img, binary, w, h):
+    """用基于内容密度的投影法精确找发票区域，返回(left, top, right, bottom)或None。
+    适用于A4扫描件/电子发票中单张发票的精确定位，避免把整页A4当成发票。
+    从页面边缘向内扫描，找到内容密度超过阈值的位置作为发票边界。"""
+    try:
+        import numpy as np
+        # 水平投影：每行的内容像素数
+        row_proj = np.sum(binary, axis=1) / 255
+        # 垂直投影：每列的内容像素数
+        col_proj = np.sum(binary, axis=0) / 255
+
+        # 内容密度阈值：行/列的内容像素数占宽度/高度的比例
+        # 用相对较高的阈值，排除边缘噪点和零星文字
+        row_threshold = w * 0.015   # 行内容超过宽度1.5%才算有内容
+        col_threshold = h * 0.015   # 列内容超过高度1.5%才算有内容
+
+        # 从顶部向下扫描，找第一个内容密度超过阈值的行
+        top = 0
+        for y in range(h):
+            if row_proj[y] >= row_threshold:
+                top = y
+                break
+
+        # 从底部向上扫描
+        bottom = h - 1
+        for y in range(h - 1, -1, -1):
+            if row_proj[y] >= row_threshold:
+                bottom = y
+                break
+
+        # 从左向右扫描
+        left = 0
+        for x in range(w):
+            if col_proj[x] >= col_threshold:
+                left = x
+                break
+
+        # 从右向左扫描
+        right = w - 1
+        for x in range(w - 1, -1, -1):
+            if col_proj[x] >= col_threshold:
+                right = x
+                break
+
+        # 验证检测到的区域合理
+        crop_w = right - left
+        crop_h = bottom - top
+        crop_area = crop_w * crop_h
+        page_area = w * h
+
+        # 区域太小（<10%页面）或太大（>98%页面）都不合理
+        if crop_area < page_area * 0.10 or crop_area > page_area * 0.98:
+            return None
+
+        # 加安全边距
+        margin = 15
+        left = max(0, left - margin)
+        top = max(0, top - margin)
+        right = min(w, right + margin)
+        bottom = min(h, bottom + margin)
+
+        return (left, top, right, bottom)
+    except Exception:
+        return None
+
+
+
 def split_invoice_image(pil_img, return_boxes=False):
     """将一页多张发票的图片分割成单张发票列表，返回PIL Image列表。
     多尺度投影法：尝试严格/中等/宽松三组阈值，取分割结果最合理的。
@@ -628,6 +696,26 @@ def split_invoice_image(pil_img, return_boxes=False):
                             candidates.append((result, boxes))
 
         if candidates:
+            # 错误分割检测：如果2张发票高而窄、垂直位置一致、宽度之和接近整页，
+            # 说明是把一张发票内部的表格竖线误判为分割线，应合并为1张走单张检测
+            filtered_candidates = []
+            for result, boxes in candidates:
+                if len(boxes) == 2:
+                    (x1, y1, x2, y2), (x3, y3, x4, y4) = boxes
+                    h1 = y2 - y1
+                    h2 = y4 - y3
+                    w1 = x2 - x1
+                    w2 = x4 - x3
+                    # 两张都很高(>60%页高)、垂直位置接近、宽度之和>70%页宽
+                    if (h1 > h * 0.60 and h2 > h * 0.60 and
+                        abs(y1 - y3) < h * 0.10 and abs(y2 - y4) < h * 0.10 and
+                        (w1 + w2) > w * 0.50):
+                        # 这是错误分割，跳过此候选
+                        continue
+                filtered_candidates.append((result, boxes))
+            candidates = filtered_candidates
+
+        if candidates:
             common = {4, 6, 8, 9, 12}
             common_candidates = [c for c in candidates if len(c[0]) in common]
             if common_candidates:
@@ -660,11 +748,12 @@ def split_invoice_image(pil_img, return_boxes=False):
                 return (best[0], rot_boxes)
             return best if return_boxes else best[0]
 
-        # fallback：单张发票，自动检测票据区域并裁剪空白边距
-        # 人工确认界面显示自动检测的裁剪框，用户确认后按此框裁剪OCR
+        # fallback：单张发票，用轮廓检测精确找发票区域，回退到投影法
+        inv_result = _detect_invoice_contour(cv_img, binary, w, h)
+        if inv_result is not None:
+            left, top, right, bottom = inv_result
         cropped_img = pil_img.crop((left, top, right, bottom))
         if rotated and return_boxes:
-            # 旋转后坐标转换回原图坐标：原图宽=旋转后高(h)，原图高=旋转后宽(w)
             orig_w = h
             nx1, ny1 = orig_w - bottom, left
             nx2, ny2 = orig_w - top, right
