@@ -4618,39 +4618,24 @@ class InvoiceTab(ScrollableTab):
             self._on_preview_resize()
 
     def _preview_view_big(self):
-        """双击预览图，打开放大查看窗口"""
+        """双击预览图，打开放大查看窗口（使用ImageViewer，支持ctrl+滚轮缩放、旋转、滚动）"""
         try:
             full = self._resolve_attachment(self._preview_path)
             if not full:
                 messagebox.showinfo("提示", "没有可查看的发票附件")
                 return
-            viewer = tk.Toplevel(self.app)
-            viewer.title("发票大图 - 双击关闭")
-            img = None
-            if str(full).lower().endswith('.pdf'):
-                img = pdf_to_image(full, dpi=200)
-            else:
-                img = Image.open(full)
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-            if img is None:
-                messagebox.showwarning("提示", "无法加载图片")
-                viewer.destroy()
-                return
-            scr_w, scr_h = self.app.winfo_screenwidth(), self.app.winfo_screenheight()
-            w, h = img.size
-            max_w, max_h = int(scr_w * 0.85), int(scr_h * 0.85)
-            if w > max_w or h > max_h:
-                ratio = min(max_w / w, max_h / h)
-                img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
-            photo = ImageTk.PhotoImage(img)
-            label = ttk.Label(viewer, image=photo)
-            label.image = photo
-            label.pack()
-            viewer.geometry(f"{img.size[0]}x{img.size[1]}")
-            label.bind('<Double-1>', lambda e: viewer.destroy())
+            # 构建简化的发票信息
+            invoice_info = {
+                'invoice_number': self.inv_no_var.get() or '无号',
+                'invoice_date': self.inv_date_var.get() or '',
+                'amount': self.amount_var.get() or 0,
+                'purpose': self.purpose_var.get() or '',
+            }
+            # 使用ImageViewer类打开，支持ctrl+滚轮缩放、旋转、滚动等完整功能
+            viewer = ImageViewer(self.app, str(full), invoice_info, invoice_id=self.selected_id)
         except Exception as e:
             _log_ocr_error(f"放大查看发票失败: {e}")
+            messagebox.showerror("错误", f"打开发票大图失败: {e}")
 
     def _clear_preview(self):
         """清空右侧预览（面板始终显示，只清空图片并恢复提示文字）"""
