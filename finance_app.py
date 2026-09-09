@@ -986,7 +986,7 @@ def _connected_component_split(binary_crop, cv_img, top, left, w, h):
             else:
                 content_x1 = content_x2 = 0
                 detected_w = 0
-            content_w = max(detected_w, cw * 0.8)
+            content_w = detected_w if detected_w > cw * 0.3 else cw * 0.8
             # 检测行方向：竖着的发票行（行高>内容宽*0.5）还是横着的发票行
             is_vertical_row = row_h > (content_w * 0.5) if content_w > 0 else False
             # 基于典型发票宽度的智能强制平分
@@ -1000,21 +1000,52 @@ def _connected_component_split(binary_crop, cv_img, top, left, w, h):
                     typical_w = 500
                 n_invoices = max(2, round(content_w / typical_w))
                 n_invoices = min(n_invoices, 6)
-                # 强制平分整个行的内容范围
+                # 智能强制平分：在估算边界附近检测实际空白列
                 step = content_w / n_invoices
+                boundaries = [content_x1]
+                for i in range(1, n_invoices):
+                    est_boundary = content_x1 + i * step
+                    # 在估算边界附近±60px检测空白列
+                    search_start = max(0, int(est_boundary - 60))
+                    search_end = min(cw, int(est_boundary + 60))
+                    search_region = binary_crop[row_y1:row_y2, search_start:search_end]
+                    col_proj_search = np.sum(search_region, axis=0) / 255
+                    blank_cols = np.where(col_proj_search < row_h * 0.005)[0]
+                    if len(blank_cols) > 0:
+                        # 找到最接近估算边界的空白列
+                        actual_boundary = search_start + blank_cols[np.argmin(np.abs(blank_cols + search_start - est_boundary))]
+                    else:
+                        actual_boundary = int(est_boundary)
+                    boundaries.append(actual_boundary)
+                boundaries.append(content_x2)
                 for i in range(n_invoices):
-                    sx1 = int(content_x1 + i * step)
-                    sx2 = int(content_x1 + (i + 1) * step)
+                    sx1 = boundaries[i]
+                    sx2 = boundaries[i + 1]
                     final_cols.append((sx1, sx2))
             elif not is_vertical_row and content_w > 300 and len(valid_cols) < 3:
                 # 横着的发票行：典型发票宽度约400px，估算发票数量
                 typical_w = 400
                 n_invoices = max(2, round(content_w / typical_w))
                 n_invoices = min(n_invoices, 4)
+                # 智能强制平分：在估算边界附近检测实际空白列
                 step = content_w / n_invoices
+                boundaries = [content_x1]
+                for i in range(1, n_invoices):
+                    est_boundary = content_x1 + i * step
+                    search_start = max(0, int(est_boundary - 60))
+                    search_end = min(cw, int(est_boundary + 60))
+                    search_region = binary_crop[row_y1:row_y2, search_start:search_end]
+                    col_proj_search = np.sum(search_region, axis=0) / 255
+                    blank_cols = np.where(col_proj_search < row_h * 0.005)[0]
+                    if len(blank_cols) > 0:
+                        actual_boundary = search_start + blank_cols[np.argmin(np.abs(blank_cols + search_start - est_boundary))]
+                    else:
+                        actual_boundary = int(est_boundary)
+                    boundaries.append(actual_boundary)
+                boundaries.append(content_x2)
                 for i in range(n_invoices):
-                    sx1 = int(content_x1 + i * step)
-                    sx2 = int(content_x1 + (i + 1) * step)
+                    sx1 = boundaries[i]
+                    sx2 = boundaries[i + 1]
                     final_cols.append((sx1, sx2))
             else:
                 # 正常情况：使用检测到的列
