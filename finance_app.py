@@ -3699,18 +3699,21 @@ class InvoiceTab(ScrollableTab):
         self.cancel_btn = ttk.Button(btn_frame, text="取消修改", command=self.cancel_edit, state='disabled')
         self.cancel_btn.grid(row=0, column=4, sticky='we', padx=2)
 
-        # 筛选
+        # 筛选（两行布局，确保窄窗口也能完整显示所有控件）
         filter_frame = ttk.Frame(self.content)
         filter_frame.pack(fill='x', padx=10, pady=4)
-        ttk.Label(filter_frame, text="状态:").pack(side='left', padx=4)
+        # 第一行：状态、类型、年份、月份
+        filter_row1 = ttk.Frame(filter_frame)
+        filter_row1.pack(fill='x', pady=2)
+        ttk.Label(filter_row1, text="状态:").pack(side='left', padx=4)
         self.filter_status = tk.StringVar(value='全部')
-        ttk.Combobox(filter_frame, textvariable=self.filter_status, values=['全部', '未报销', '已报销', '待完善'],
+        ttk.Combobox(filter_row1, textvariable=self.filter_status, values=['全部', '未报销', '已报销', '待完善'],
                      width=8, state='readonly').pack(side='left', padx=4)
-        ttk.Label(filter_frame, text="类型:").pack(side='left', padx=4)
+        ttk.Label(filter_row1, text="类型:").pack(side='left', padx=4)
         self.filter_type = tk.StringVar(value='全部')
-        ttk.Combobox(filter_frame, textvariable=self.filter_type, values=['全部', '发票', '支付记录'],
+        ttk.Combobox(filter_row1, textvariable=self.filter_type, values=['全部', '发票', '支付记录'],
                      width=8, state='readonly').pack(side='left', padx=4)
-        ttk.Label(filter_frame, text="年份:").pack(side='left', padx=4)
+        ttk.Label(filter_row1, text="年份:").pack(side='left', padx=4)
         now = datetime.now()
         # 从人员最早入职年份开始，到当前年+5
         try:
@@ -3727,22 +3730,25 @@ class InvoiceTab(ScrollableTab):
             min_year = 2015
         self.filter_year = tk.StringVar(value=str(now.year))
         year_options = ['全部'] + [str(y) for y in range(min_year, now.year + 1)]
-        ttk.Combobox(filter_frame, textvariable=self.filter_year, values=year_options,
+        ttk.Combobox(filter_row1, textvariable=self.filter_year, values=year_options,
                      width=6, state='readonly').pack(side='left', padx=4)
-        ttk.Label(filter_frame, text="月份:").pack(side='left', padx=4)
+        ttk.Label(filter_row1, text="月份:").pack(side='left', padx=4)
         self.filter_month = tk.StringVar(value='全部')
         month_options = ['全部'] + [f"{m:02d}" for m in range(1, 13)]
-        ttk.Combobox(filter_frame, textvariable=self.filter_month, values=month_options,
+        ttk.Combobox(filter_row1, textvariable=self.filter_month, values=month_options,
                      width=6, state='readonly').pack(side='left', padx=4)
-        ttk.Label(filter_frame, text="排版:").pack(side='left', padx=4)
+        # 第二行：排版、报销人、应用筛选按钮
+        filter_row2 = ttk.Frame(filter_frame)
+        filter_row2.pack(fill='x', pady=2)
+        ttk.Label(filter_row2, text="排版:").pack(side='left', padx=4)
         self.filter_printed = tk.StringVar(value='全部')
-        ttk.Combobox(filter_frame, textvariable=self.filter_printed, values=['全部', '未排版', '已排版'],
+        ttk.Combobox(filter_row2, textvariable=self.filter_printed, values=['全部', '未排版', '已排版'],
                      width=7, state='readonly').pack(side='left', padx=4)
-        ttk.Label(filter_frame, text="报销人:").pack(side='left', padx=4)
+        ttk.Label(filter_row2, text="报销人:").pack(side='left', padx=4)
         self.filter_person = tk.StringVar(value='全部')
-        self.filter_person_cb = ttk.Combobox(filter_frame, textvariable=self.filter_person, width=12, state='readonly')
+        self.filter_person_cb = ttk.Combobox(filter_row2, textvariable=self.filter_person, width=12, state='readonly')
         self.filter_person_cb.pack(side='left', padx=4)
-        ttk.Button(filter_frame, text="应用筛选", command=self.refresh).pack(side='left', padx=4)
+        ttk.Button(filter_row2, text="应用筛选", command=self.refresh).pack(side='left', padx=4)
 
         # 表格
         tbl_frame = ttk.Frame(self.content)
