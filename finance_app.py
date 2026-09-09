@@ -9899,6 +9899,14 @@ class AnnotationEditor(tk.Toplevel):
         self.selected_field = None
         self._update_info_panel()
         self.redraw()
+        # 强制刷新Canvas，确保删除后立即消失，不需要手动点击
+        try:
+            self.canvas.update_idletasks()
+            self.canvas.update()
+            self.update_idletasks()
+            self.update()
+        except Exception:
+            pass
 
     def auto_recognize_fields(self):
         """对当前页所有发票自动OCR识别发票号/日期/金额并生成绿框（后台线程，避免卡顿）"""
