@@ -9487,6 +9487,8 @@ class AnnotationEditor(tk.Toplevel):
         self.selected_edge = -1
         self.selected_field = None
         self.selected_field_edge = -1
+        # 记录每个字段框的所有Canvas元素ID，便于直接删除
+        self._field_element_ids = {}
         self.redraw()
 
     def _to_screen(self, x, y):
@@ -9552,6 +9554,8 @@ class AnnotationEditor(tk.Toplevel):
             # 绘制绿框（字段强化框），在红框之上
             field_colors = {fn: color for fn, label, color in self.FIELD_TYPES}
             field_labels = {fn: lb for fn, lb, _ in self.FIELD_TYPES}
+            # 清空旧的元素ID记录
+            self._field_element_ids = {}
             for box_idx in range(len(ann['boxes'])):
                 fb = ann['field_boxes'][box_idx]
                 for field_name, fpoints in fb.items():
@@ -9559,6 +9563,7 @@ class AnnotationEditor(tk.Toplevel):
                         continue
                     # 给该字段框的所有Canvas元素添加统一标签，便于单独删除
                     _field_tag = f"field_{box_idx}_{field_name}"
+                    _elem_ids = []
                     screen_pts = []
                     for px, py in fpoints:
                         sx, sy = self._to_screen(px, py)
@@ -9567,20 +9572,23 @@ class AnnotationEditor(tk.Toplevel):
                     fcolor = field_colors.get(field_name, '#34C759')
                     width = 3 if is_sel else 2
                     dash = None if is_sel else (5, 3)
-                    self.canvas.create_polygon(screen_pts, outline=fcolor, width=width, fill='', dash=dash, tags=(_field_tag,))
+                    _id = self.canvas.create_polygon(screen_pts, outline=fcolor, width=width, fill='', dash=dash, tags=(_field_tag,))
+                    _elem_ids.append(_id)
                     # 字段标签
                     cx = sum(p[0] for p in fpoints) / 4
                     cy = sum(p[1] for p in fpoints) / 4
                     scx, scy = self._to_screen(cx, cy)
-                    self.canvas.create_text(scx, scy, text=field_labels.get(field_name, field_name),
+                    _id = self.canvas.create_text(scx, scy, text=field_labels.get(field_name, field_name),
                                            fill=fcolor, font=('微软雅黑', 9, 'bold'), tags=(_field_tag,))
+                    _elem_ids.append(_id)
                     # 绿框顶点
                     if is_sel:
                         for vi, (px, py) in enumerate(fpoints):
                             sx, sy = self._to_screen(px, py)
-                            self.canvas.create_oval(sx - self.VERTEX_SIZE // 2, sy - self.VERTEX_SIZE // 2,
+                            _id = self.canvas.create_oval(sx - self.VERTEX_SIZE // 2, sy - self.VERTEX_SIZE // 2,
                                                     sx + self.VERTEX_SIZE // 2, sy + self.VERTEX_SIZE // 2,
                                                     fill='#FFD60A', outline=fcolor, width=2, tags=(_field_tag,))
+                            _elem_ids.append(_id)
                         # 绿框4条边的中点（可整条边拉伸，与红框一致）
                         edge_ends = [(0, 1), (1, 2), (2, 3), (3, 0)]
                         for ei, (a, b) in enumerate(edge_ends):
@@ -9590,9 +9598,13 @@ class AnnotationEditor(tk.Toplevel):
                             edge_sel = (self.selected_field == (box_idx, field_name) and
                                         self.selected_field_edge == ei)
                             fill_c = '#FFFFFF' if edge_sel else '#FF9500'
-                            self.canvas.create_rectangle(sx - self.VERTEX_SIZE // 2, sy - self.VERTEX_SIZE // 2,
+                            _id = self.canvas.create_rectangle(sx - self.VERTEX_SIZE // 2, sy - self.VERTEX_SIZE // 2,
                                                          sx + self.VERTEX_SIZE // 2, sy + self.VERTEX_SIZE // 2,
                                                          fill=fill_c, outline=fcolor, width=2, tags=(_field_tag,))
+                            _elem_ids.append(_id)
+
+                    # 保存该字段框的所有元素ID
+                    self._field_element_ids[(box_idx, field_name)] = _elem_ids
 
             # 更新底部统计
             field_count = sum(1 for fb in ann.get('field_boxes', []) for v in fb.values() if v is not None)
@@ -9896,20 +9908,25 @@ class AnnotationEditor(tk.Toplevel):
         box_idx, field_name = self.selected_field
         if 'field_boxes' not in ann or len(ann['field_boxes']) <= box_idx:
             return
+        # 先保存要删除的元素ID，再清除选中状态
+        _elem_ids = list(self._field_element_ids.get((box_idx, field_name), []))
         # 只删除选中的那个字段框的数据
         ann['field_boxes'][box_idx][field_name] = None
         self.selected_field = None
+        # 从字典中移除
+        if (box_idx, field_name) in self._field_element_ids:
+            del self._field_element_ids[(box_idx, field_name)]
         self._update_info_panel()
-        # 关键：直接删除Canvas上对应标签的所有元素，不需要重绘整个Canvas
+        # 关键：直接按元素ID删除Canvas上的元素，不需要重绘整个Canvas
         # 这样可以避免重绘时序问题，字段框会立即消失
-        _field_tag = f"field_{box_idx}_{field_name}"
         try:
-            self.canvas.delete(_field_tag)
+            for _id in _elem_ids:
+                self.canvas.delete(_id)
             self.canvas.update_idletasks()
             self.canvas.update()
         except Exception as e:
-            # 如果删除标签失败，回退到完整重绘
-            _log_ocr_error(f"删除字段框标签失败，回退到重绘: {e}")
+            # 如果删除失败，回退到完整重绘
+            _log_ocr_error(f"删除字段框元素失败，回退到重绘: {e}")
             self.redraw()
             self.update_idletasks()
             self.update()
