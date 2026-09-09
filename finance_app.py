@@ -1738,6 +1738,13 @@ def ocr_invoice_number(image_path):
         # 执行OCR
         result, elapse = engine(path_to_ocr)
 
+        # 释放图片内存
+        try:
+            img.close()
+        except Exception:
+            pass
+        img = None
+
         # 清理临时文件
         try:
             os.unlink(path_to_ocr)
@@ -1756,6 +1763,12 @@ def ocr_invoice_number(image_path):
         _log_ocr_error(f"OCR异常: {e}")
         import traceback
         _log_ocr_error(traceback.format_exc())
+        # 释放图片内存
+        try:
+            if 'img' in locals():
+                img.close()
+        except Exception:
+            pass
         return None, None
 
 
@@ -7418,6 +7431,11 @@ class ImageViewer(tk.Toplevel):
             nh = max(1, int(ih * self.zoom))
         resized = self._orig.resize((nw, nh), Image.LANCZOS)
         self._photo = ImageTk.PhotoImage(resized)
+        # 释放resized图片内存（PhotoImage已复制数据）
+        try:
+            resized.close()
+        except Exception:
+            pass
         self.canvas.delete('all')
         # 图片大于画布时左上角对齐，支持滚动；小于时居中（始终居中显示）
         if nw > cw or nh > ch:
@@ -9567,6 +9585,15 @@ class AnnotationEditor(tk.Toplevel):
             # 更新底部统计
             field_count = sum(1 for fb in ann.get('field_boxes', []) for v in fb.values() if v is not None)
             self.box_count_label.config(text=f"当前页 {len(ann['boxes'])} 张发票，{field_count} 个字段强化框")
+            # 释放图片内存（PhotoImage已复制数据）
+            try:
+                resized.close()
+            except Exception:
+                pass
+            try:
+                orig_img.close()
+            except Exception:
+                pass
 
         except Exception as e:
             _log_ocr_error(f"人工确认编辑器redraw失败: {e}")
@@ -11164,6 +11191,11 @@ class PaymentListEditor(tk.Toplevel):
         disp_img.thumbnail((disp_w, disp_h), Image.LANCZOS)
         self._photo = ImageTk.PhotoImage(disp_img)
         self.canvas.create_image(0, 0, anchor='nw', image=self._photo)
+        # 释放disp_img内存（PhotoImage已复制数据）
+        try:
+            disp_img.close()
+        except Exception:
+            pass
         self.canvas.configure(scrollregion=(0, 0, disp_w, disp_h))
 
         for i, b in enumerate(self.boxes):
