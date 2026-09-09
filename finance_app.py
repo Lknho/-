@@ -7142,13 +7142,13 @@ class ImageViewer(tk.Toplevel):
         self._img_path = img_path
         self._rotation = 0
         self._invoice_id = invoice_id
-        self.minsize(420, 520)
+        self.minsize(420, 600)
         # 根据图片比例设置初始窗口大小（信息栏约120px + 控制栏约50px + 边距约30px）
         try:
             _tmp_img = Image.open(img_path)
             _iw, _ih = _tmp_img.size
             _tmp_img.close()
-            _ui_h = 200  # 信息栏+控制栏+边距总高度
+            _ui_h = 260  # 信息栏+控制栏+边距总高度（确保底部按钮完整显示）
             _ui_w = 40   # 左右边距+滚动条
             _max_w = int(self.winfo_screenwidth() * 0.75)
             _max_h = int(self.winfo_screenheight() * 0.85)
@@ -9452,104 +9452,108 @@ class AnnotationEditor(tk.Toplevel):
         return ((sx - self._img_offset[0]) / self._scale, (sy - self._img_offset[1]) / self._scale)
 
     def redraw(self):
-        self.canvas.delete('all')
-        ann = self.annotations[self.current_idx]
         try:
-            orig_img = Image.open(ann['orig_path'])
-        except Exception:
-            return
-        cw = self.canvas.winfo_width() or 1000
-        ch = self.canvas.winfo_height() or 600
-        if cw < 50: cw = 1000
-        if ch < 50: ch = 600
-        iw, ih = orig_img.size
-        self._scale = min(cw / iw, ch / ih, 1.0)
-        dw, dh = int(iw * self._scale), int(ih * self._scale)
-        self._img_offset = ((cw - dw) // 2, (ch - dh) // 2)
-        resized = orig_img.resize((dw, dh), Image.LANCZOS)
-        self._photo = ImageTk.PhotoImage(resized)
-        ox, oy = self._img_offset
-        self.canvas.create_image(ox, oy, anchor='nw', image=self._photo)
+            self.canvas.delete('all')
+            ann = self.annotations[self.current_idx]
+            try:
+                orig_img = Image.open(ann['orig_path'])
+            except Exception:
+                return
+            cw = self.canvas.winfo_width() or 1000
+            ch = self.canvas.winfo_height() or 600
+            if cw < 50: cw = 1000
+            if ch < 50: ch = 600
+            iw, ih = orig_img.size
+            self._scale = min(cw / iw, ch / ih, 1.0)
+            dw, dh = int(iw * self._scale), int(ih * self._scale)
+            self._img_offset = ((cw - dw) // 2, (ch - dh) // 2)
+            resized = orig_img.resize((dw, dh), Image.LANCZOS)
+            self._photo = ImageTk.PhotoImage(resized)
+            ox, oy = self._img_offset
+            self.canvas.create_image(ox, oy, anchor='nw', image=self._photo)
 
-        for i, points in enumerate(ann['boxes']):
-            screen_pts = []
-            for px, py in points:
-                sx, sy = self._to_screen(px, py)
-                screen_pts.extend([sx, sy])
-            is_sel = (i == self.selected_box and self.selected_field is None)
-            color = '#FF3B30' if is_sel else '#FF6B6B'
-            width = 3 if is_sel else 2
-            dash = None if is_sel else (4, 2)
-            self.canvas.create_polygon(screen_pts, outline=color, width=width, fill='', dash=dash)
-            # 序号
-            cx = sum(p[0] for p in points) / 4
-            cy = sum(p[1] for p in points) / 4
-            scx, scy = self._to_screen(cx, cy)
-            self.canvas.create_text(scx, scy - 10, text=str(i + 1), fill=color, font=('Arial', 14, 'bold'))
-            # 红框顶点（仅当红框被选中且没有选中绿框时）
-            if is_sel:
-                for vi, (px, py) in enumerate(points):
-                    sx, sy = self._to_screen(px, py)
-                    self.canvas.create_oval(sx - self.VERTEX_SIZE // 2, sy - self.VERTEX_SIZE // 2,
-                                            sx + self.VERTEX_SIZE // 2, sy + self.VERTEX_SIZE // 2,
-                                            fill='#FFD60A', outline='#FF3B30', width=2)
-                # 红框4条边的中点（可整条边拉伸）
-                edge_ends = [(0, 1), (1, 2), (2, 3), (3, 0)]
-                for ei, (a, b) in enumerate(edge_ends):
-                    mx = (points[a][0] + points[b][0]) / 2
-                    my = (points[a][1] + points[b][1]) / 2
-                    sx, sy = self._to_screen(mx, my)
-                    fill_c = '#FFFFFF' if ei == self.selected_edge else '#FF9500'
-                    self.canvas.create_rectangle(sx - self.VERTEX_SIZE // 2, sy - self.VERTEX_SIZE // 2,
-                                                 sx + self.VERTEX_SIZE // 2, sy + self.VERTEX_SIZE // 2,
-                                                 fill=fill_c, outline='#FF3B30', width=2)
-
-        # 绘制绿框（字段强化框），在红框之上
-        field_colors = {fn: color for fn, label, color in self.FIELD_TYPES}
-        field_labels = {fn: lb for fn, lb, _ in self.FIELD_TYPES}
-        for box_idx in range(len(ann['boxes'])):
-            fb = ann['field_boxes'][box_idx]
-            for field_name, fpoints in fb.items():
-                if fpoints is None:
-                    continue
+            for i, points in enumerate(ann['boxes']):
                 screen_pts = []
-                for px, py in fpoints:
+                for px, py in points:
                     sx, sy = self._to_screen(px, py)
                     screen_pts.extend([sx, sy])
-                is_sel = (self.selected_field == (box_idx, field_name))
-                fcolor = field_colors.get(field_name, '#34C759')
+                is_sel = (i == self.selected_box and self.selected_field is None)
+                color = '#FF3B30' if is_sel else '#FF6B6B'
                 width = 3 if is_sel else 2
-                dash = None if is_sel else (5, 3)
-                self.canvas.create_polygon(screen_pts, outline=fcolor, width=width, fill='', dash=dash)
-                # 字段标签
-                cx = sum(p[0] for p in fpoints) / 4
-                cy = sum(p[1] for p in fpoints) / 4
+                dash = None if is_sel else (4, 2)
+                self.canvas.create_polygon(screen_pts, outline=color, width=width, fill='', dash=dash)
+                # 序号
+                cx = sum(p[0] for p in points) / 4
+                cy = sum(p[1] for p in points) / 4
                 scx, scy = self._to_screen(cx, cy)
-                self.canvas.create_text(scx, scy, text=field_labels.get(field_name, field_name),
-                                       fill=fcolor, font=('微软雅黑', 9, 'bold'))
-                # 绿框顶点
+                self.canvas.create_text(scx, scy - 10, text=str(i + 1), fill=color, font=('Arial', 14, 'bold'))
+                # 红框顶点（仅当红框被选中且没有选中绿框时）
                 if is_sel:
-                    for vi, (px, py) in enumerate(fpoints):
+                    for vi, (px, py) in enumerate(points):
                         sx, sy = self._to_screen(px, py)
                         self.canvas.create_oval(sx - self.VERTEX_SIZE // 2, sy - self.VERTEX_SIZE // 2,
                                                 sx + self.VERTEX_SIZE // 2, sy + self.VERTEX_SIZE // 2,
-                                                fill='#FFD60A', outline=fcolor, width=2)
-                    # 绿框4条边的中点（可整条边拉伸，与红框一致）
+                                                fill='#FFD60A', outline='#FF3B30', width=2)
+                    # 红框4条边的中点（可整条边拉伸）
                     edge_ends = [(0, 1), (1, 2), (2, 3), (3, 0)]
                     for ei, (a, b) in enumerate(edge_ends):
-                        mx = (fpoints[a][0] + fpoints[b][0]) / 2
-                        my = (fpoints[a][1] + fpoints[b][1]) / 2
+                        mx = (points[a][0] + points[b][0]) / 2
+                        my = (points[a][1] + points[b][1]) / 2
                         sx, sy = self._to_screen(mx, my)
-                        edge_sel = (self.selected_field == (box_idx, field_name) and
-                                    self.selected_field_edge == ei)
-                        fill_c = '#FFFFFF' if edge_sel else '#FF9500'
+                        fill_c = '#FFFFFF' if ei == self.selected_edge else '#FF9500'
                         self.canvas.create_rectangle(sx - self.VERTEX_SIZE // 2, sy - self.VERTEX_SIZE // 2,
                                                      sx + self.VERTEX_SIZE // 2, sy + self.VERTEX_SIZE // 2,
-                                                     fill=fill_c, outline=fcolor, width=2)
+                                                     fill=fill_c, outline='#FF3B30', width=2)
 
-        # 更新底部统计
-        field_count = sum(1 for fb in ann.get('field_boxes', []) for v in fb.values() if v is not None)
-        self.box_count_label.config(text=f"当前页 {len(ann['boxes'])} 张发票，{field_count} 个字段强化框")
+            # 绘制绿框（字段强化框），在红框之上
+            field_colors = {fn: color for fn, label, color in self.FIELD_TYPES}
+            field_labels = {fn: lb for fn, lb, _ in self.FIELD_TYPES}
+            for box_idx in range(len(ann['boxes'])):
+                fb = ann['field_boxes'][box_idx]
+                for field_name, fpoints in fb.items():
+                    if fpoints is None:
+                        continue
+                    screen_pts = []
+                    for px, py in fpoints:
+                        sx, sy = self._to_screen(px, py)
+                        screen_pts.extend([sx, sy])
+                    is_sel = (self.selected_field == (box_idx, field_name))
+                    fcolor = field_colors.get(field_name, '#34C759')
+                    width = 3 if is_sel else 2
+                    dash = None if is_sel else (5, 3)
+                    self.canvas.create_polygon(screen_pts, outline=fcolor, width=width, fill='', dash=dash)
+                    # 字段标签
+                    cx = sum(p[0] for p in fpoints) / 4
+                    cy = sum(p[1] for p in fpoints) / 4
+                    scx, scy = self._to_screen(cx, cy)
+                    self.canvas.create_text(scx, scy, text=field_labels.get(field_name, field_name),
+                                           fill=fcolor, font=('微软雅黑', 9, 'bold'))
+                    # 绿框顶点
+                    if is_sel:
+                        for vi, (px, py) in enumerate(fpoints):
+                            sx, sy = self._to_screen(px, py)
+                            self.canvas.create_oval(sx - self.VERTEX_SIZE // 2, sy - self.VERTEX_SIZE // 2,
+                                                    sx + self.VERTEX_SIZE // 2, sy + self.VERTEX_SIZE // 2,
+                                                    fill='#FFD60A', outline=fcolor, width=2)
+                        # 绿框4条边的中点（可整条边拉伸，与红框一致）
+                        edge_ends = [(0, 1), (1, 2), (2, 3), (3, 0)]
+                        for ei, (a, b) in enumerate(edge_ends):
+                            mx = (fpoints[a][0] + fpoints[b][0]) / 2
+                            my = (fpoints[a][1] + fpoints[b][1]) / 2
+                            sx, sy = self._to_screen(mx, my)
+                            edge_sel = (self.selected_field == (box_idx, field_name) and
+                                        self.selected_field_edge == ei)
+                            fill_c = '#FFFFFF' if edge_sel else '#FF9500'
+                            self.canvas.create_rectangle(sx - self.VERTEX_SIZE // 2, sy - self.VERTEX_SIZE // 2,
+                                                         sx + self.VERTEX_SIZE // 2, sy + self.VERTEX_SIZE // 2,
+                                                         fill=fill_c, outline=fcolor, width=2)
+
+            # 更新底部统计
+            field_count = sum(1 for fb in ann.get('field_boxes', []) for v in fb.values() if v is not None)
+            self.box_count_label.config(text=f"当前页 {len(ann['boxes'])} 张发票，{field_count} 个字段强化框")
+
+        except Exception as e:
+            _log_ocr_error(f"人工确认编辑器redraw失败: {e}")
 
     def _point_in_polygon(self, px, py, points):
         """判断点是否在多边形内（射线法）"""
@@ -9661,80 +9665,84 @@ class AnnotationEditor(tk.Toplevel):
         self.redraw()
 
     def on_mouse_drag(self, event):
-        if self.drag_start is None:
-            return
-        ann = self.annotations[self.current_idx]
-        dx = (event.x - self.drag_start[0]) / self._scale
-        dy = (event.y - self.drag_start[1]) / self._scale
-        iw, ih = ann['img_size']
+        try:
+            if self.drag_start is None:
+                return
+            ann = self.annotations[self.current_idx]
+            dx = (event.x - self.drag_start[0]) / self._scale
+            dy = (event.y - self.drag_start[1]) / self._scale
+            iw, ih = ann['img_size']
 
-        # 判断拖拽的是绿框还是红框
-        if self.selected_field is not None:
-            box_idx, field_name = self.selected_field
-            if self.selected_vertex >= 0:
-                # 移动绿框单个顶点
-                points = [p[:] for p in self.drag_box_start]
-                nx = max(0, min(iw, points[self.selected_vertex][0] + dx))
-                ny = max(0, min(ih, points[self.selected_vertex][1] + dy))
-                points[self.selected_vertex] = (nx, ny)
-                ann['field_boxes'][box_idx][field_name] = points
-            elif self.selected_field_edge >= 0:
-                # 绿框边中点拉伸：整条边往外/往里拉（该边两个端点同步移动）
-                points = [p[:] for p in self.drag_box_start]
-                edge_ends = [(0, 1), (1, 2), (2, 3), (3, 0)]
-                i1, i2 = edge_ends[self.selected_field_edge]
-                if self.selected_field_edge in (0, 2):
-                    # 上/下边：只改变 y（垂直拉伸）
-                    for vi in (i1, i2):
-                        ny = max(0, min(ih, points[vi][1] + dy))
-                        points[vi] = (points[vi][0], ny)
+            # 判断拖拽的是绿框还是红框
+            if self.selected_field is not None:
+                box_idx, field_name = self.selected_field
+                if self.selected_vertex >= 0:
+                    # 移动绿框单个顶点
+                    points = [p[:] for p in self.drag_box_start]
+                    nx = max(0, min(iw, points[self.selected_vertex][0] + dx))
+                    ny = max(0, min(ih, points[self.selected_vertex][1] + dy))
+                    points[self.selected_vertex] = (nx, ny)
+                    ann['field_boxes'][box_idx][field_name] = points
+                elif self.selected_field_edge >= 0:
+                    # 绿框边中点拉伸：整条边往外/往里拉（该边两个端点同步移动）
+                    points = [p[:] for p in self.drag_box_start]
+                    edge_ends = [(0, 1), (1, 2), (2, 3), (3, 0)]
+                    i1, i2 = edge_ends[self.selected_field_edge]
+                    if self.selected_field_edge in (0, 2):
+                        # 上/下边：只改变 y（垂直拉伸）
+                        for vi in (i1, i2):
+                            ny = max(0, min(ih, points[vi][1] + dy))
+                            points[vi] = (points[vi][0], ny)
+                    else:
+                        # 左/右边：只改变 x（水平拉伸）
+                        for vi in (i1, i2):
+                            nx = max(0, min(iw, points[vi][0] + dx))
+                            points[vi] = (nx, points[vi][1])
+                    ann['field_boxes'][box_idx][field_name] = points
                 else:
-                    # 左/右边：只改变 x（水平拉伸）
-                    for vi in (i1, i2):
-                        nx = max(0, min(iw, points[vi][0] + dx))
-                        points[vi] = (nx, points[vi][1])
-                ann['field_boxes'][box_idx][field_name] = points
-            else:
-                # 移动整个绿框
-                points = []
-                for px, py in self.drag_box_start:
-                    nx = max(0, min(iw, px + dx))
-                    ny = max(0, min(ih, py + dy))
-                    points.append((nx, ny))
-                ann['field_boxes'][box_idx][field_name] = points
-        elif self.selected_box >= 0:
-            if self.selected_vertex >= 0:
-                # 移动红框单个顶点
-                points = [p[:] for p in self.drag_box_start]
-                nx = max(0, min(iw, points[self.selected_vertex][0] + dx))
-                ny = max(0, min(ih, points[self.selected_vertex][1] + dy))
-                points[self.selected_vertex] = (nx, ny)
-                ann['boxes'][self.selected_box] = points
-            elif self.selected_edge >= 0:
-                # 边中点拖拽：整条边往外/往里拉伸（该边两个端点同步移动）
-                points = [p[:] for p in self.drag_box_start]
-                edge_ends = [(0, 1), (1, 2), (2, 3), (3, 0)]
-                i1, i2 = edge_ends[self.selected_edge]
-                if self.selected_edge in (0, 2):
-                    # 上/下边：只改变 y（垂直拉伸）
-                    for vi in (i1, i2):
-                        ny = max(0, min(ih, points[vi][1] + dy))
-                        points[vi] = (points[vi][0], ny)
+                    # 移动整个绿框
+                    points = []
+                    for px, py in self.drag_box_start:
+                        nx = max(0, min(iw, px + dx))
+                        ny = max(0, min(ih, py + dy))
+                        points.append((nx, ny))
+                    ann['field_boxes'][box_idx][field_name] = points
+            elif self.selected_box >= 0:
+                if self.selected_vertex >= 0:
+                    # 移动红框单个顶点
+                    points = [p[:] for p in self.drag_box_start]
+                    nx = max(0, min(iw, points[self.selected_vertex][0] + dx))
+                    ny = max(0, min(ih, points[self.selected_vertex][1] + dy))
+                    points[self.selected_vertex] = (nx, ny)
+                    ann['boxes'][self.selected_box] = points
+                elif self.selected_edge >= 0:
+                    # 边中点拖拽：整条边往外/往里拉伸（该边两个端点同步移动）
+                    points = [p[:] for p in self.drag_box_start]
+                    edge_ends = [(0, 1), (1, 2), (2, 3), (3, 0)]
+                    i1, i2 = edge_ends[self.selected_edge]
+                    if self.selected_edge in (0, 2):
+                        # 上/下边：只改变 y（垂直拉伸）
+                        for vi in (i1, i2):
+                            ny = max(0, min(ih, points[vi][1] + dy))
+                            points[vi] = (points[vi][0], ny)
+                    else:
+                        # 左/右边：只改变 x（水平拉伸）
+                        for vi in (i1, i2):
+                            nx = max(0, min(iw, points[vi][0] + dx))
+                            points[vi] = (nx, points[vi][1])
+                    ann['boxes'][self.selected_box] = points
                 else:
-                    # 左/右边：只改变 x（水平拉伸）
-                    for vi in (i1, i2):
-                        nx = max(0, min(iw, points[vi][0] + dx))
-                        points[vi] = (nx, points[vi][1])
-                ann['boxes'][self.selected_box] = points
-            else:
-                # 移动整个红框
-                points = []
-                for px, py in self.drag_box_start:
-                    nx = max(0, min(iw, px + dx))
-                    ny = max(0, min(ih, py + dy))
-                    points.append((nx, ny))
-                ann['boxes'][self.selected_box] = points
-        self.redraw()
+                    # 移动整个红框
+                    points = []
+                    for px, py in self.drag_box_start:
+                        nx = max(0, min(iw, px + dx))
+                        ny = max(0, min(ih, py + dy))
+                        points.append((nx, ny))
+                    ann['boxes'][self.selected_box] = points
+            self.redraw()
+
+        except Exception as e:
+            _log_ocr_error(f"人工确认编辑器on_mouse_drag失败: {e}")
 
     def on_mouse_up(self, event):
         self.drag_start = None
