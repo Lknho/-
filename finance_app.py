@@ -9898,15 +9898,26 @@ class AnnotationEditor(tk.Toplevel):
         ann['field_boxes'][box_idx][field_name] = None
         self.selected_field = None
         self._update_info_panel()
-        self.redraw()
-        # 强制刷新Canvas，确保删除后立即消失，不需要手动点击
+        # 先直接清空Canvas，确保删除后立即消失
         try:
+            self.canvas.delete('all')
+            self.canvas.update_idletasks()
+            self.canvas.update()
+        except Exception:
+            pass
+        # 延迟重绘，确保数据更新完成后再绘制
+        self.after(10, self._safe_redraw)
+
+    def _safe_redraw(self):
+        """安全重绘，捕获所有异常避免闪退"""
+        try:
+            self.redraw()
             self.canvas.update_idletasks()
             self.canvas.update()
             self.update_idletasks()
             self.update()
-        except Exception:
-            pass
+        except Exception as e:
+            _log_ocr_error(f"人工确认编辑器重绘失败: {e}")
 
     def auto_recognize_fields(self):
         """对当前页所有发票自动OCR识别发票号/日期/金额并生成绿框（后台线程，避免卡顿）"""
