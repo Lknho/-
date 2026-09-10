@@ -9398,6 +9398,10 @@ class AnnotationEditor(tk.Toplevel):
         self._user_zoom = 1.0
         self._base_scale = 1.0
         self._img_size = (0, 0)
+        # 缩放画质控制：缩放过程中用NEAREST（快），停止后用LANCZOS（清晰）
+        self._zoom_quality = Image.LANCZOS
+        self._zoom_stop_after_id = None
+        self._last_redraw_time = 0
 
         # 将矩形框转换为四边形4顶点，并初始化每个发票的字段框
         for ann in self.annotations:
@@ -9599,7 +9603,7 @@ class AnnotationEditor(tk.Toplevel):
                 except Exception:
                     pass
             
-            resized = orig_img.resize((dw, dh), Image.LANCZOS)
+            resized = orig_img.resize((dw, dh), self._zoom_quality)
             self._photo = ImageTk.PhotoImage(resized)
             ox, oy = self._img_offset
             self.canvas.create_image(ox, oy, anchor='nw', image=self._photo)
@@ -9724,9 +9728,29 @@ class AnnotationEditor(tk.Toplevel):
     def on_ctrl_mouse_wheel(self, event, delta=None):
         """Ctrl+鼠标滚轮缩放，以鼠标位置为中心"""
         try:
+            import time
             wheel_delta = delta if delta is not None else event.delta
             if wheel_delta == 0:
                 return
+            # 节流：限制最大重绘频率为60fps（16ms）
+            now = time.time()
+            if now - self._last_redraw_time < 0.016:
+                # 频率限制内，保存参数稍后执行
+                self._pending_wheel_event = (event, delta)
+                if self._zoom_stop_after_id is None:
+                    self._zoom_stop_after_id = self.after(16, self._flush_pending_wheel)
+                return
+            self._last_redraw_time = now
+            # 缩放过程中切换到快速画质NEAREST
+            self._zoom_quality = Image.NEAREST
+            # 取消之前的停止后高画质重绘
+            if self._zoom_stop_after_id is not None:
+                try:
+                    self.after_cancel(self._zoom_stop_after_id)
+                except Exception:
+                    pass
+            # 200ms后没有滚轮事件，切换回高画质LANCZOS重新渲染
+            self._zoom_stop_after_id = self.after(200, self._zoom_stop_high_quality)
             old_zoom = self._user_zoom
             if wheel_delta > 0:
                 new_zoom = min(old_zoom * 1.1, 5.0)
@@ -9772,6 +9796,26 @@ class AnnotationEditor(tk.Toplevel):
                 if '缩放' not in current_text:
                     self.box_count_label.config(text=current_text + f" | 缩放: {zoom_percent}%")
         except Exception as e:
+            pass
+
+    def _flush_pending_wheel(self):
+        """执行待处理的滚轮事件（节流补充）"""
+        try:
+            self._zoom_stop_after_id = None
+            if hasattr(self, '_pending_wheel_event') and self._pending_wheel_event is not None:
+                event, delta = self._pending_wheel_event
+                self._pending_wheel_event = None
+                self.on_ctrl_mouse_wheel(event, delta)
+        except Exception:
+            pass
+
+    def _zoom_stop_high_quality(self):
+        """缩放停止后切换回高画质LANCZOS重新渲染"""
+        try:
+            self._zoom_stop_after_id = None
+            self._zoom_quality = Image.LANCZOS
+            self.redraw()
+        except Exception:
             pass
 
     def reset_zoom(self):
@@ -11486,9 +11530,29 @@ class PaymentListEditor(tk.Toplevel):
     def on_ctrl_mouse_wheel(self, event, delta=None):
         """Ctrl+鼠标滚轮缩放，以鼠标位置为中心"""
         try:
+            import time
             wheel_delta = delta if delta is not None else event.delta
             if wheel_delta == 0:
                 return
+            # 节流：限制最大重绘频率为60fps（16ms）
+            now = time.time()
+            if now - self._last_redraw_time < 0.016:
+                # 频率限制内，保存参数稍后执行
+                self._pending_wheel_event = (event, delta)
+                if self._zoom_stop_after_id is None:
+                    self._zoom_stop_after_id = self.after(16, self._flush_pending_wheel)
+                return
+            self._last_redraw_time = now
+            # 缩放过程中切换到快速画质NEAREST
+            self._zoom_quality = Image.NEAREST
+            # 取消之前的停止后高画质重绘
+            if self._zoom_stop_after_id is not None:
+                try:
+                    self.after_cancel(self._zoom_stop_after_id)
+                except Exception:
+                    pass
+            # 200ms后没有滚轮事件，切换回高画质LANCZOS重新渲染
+            self._zoom_stop_after_id = self.after(200, self._zoom_stop_high_quality)
             old_zoom = self._user_zoom
             if wheel_delta > 0:
                 new_zoom = min(old_zoom * 1.1, 5.0)
@@ -11534,6 +11598,26 @@ class PaymentListEditor(tk.Toplevel):
                 if '缩放' not in current_text:
                     self.box_count_label.config(text=current_text + f" | 缩放: {zoom_percent}%")
         except Exception as e:
+            pass
+
+    def _flush_pending_wheel(self):
+        """执行待处理的滚轮事件（节流补充）"""
+        try:
+            self._zoom_stop_after_id = None
+            if hasattr(self, '_pending_wheel_event') and self._pending_wheel_event is not None:
+                event, delta = self._pending_wheel_event
+                self._pending_wheel_event = None
+                self.on_ctrl_mouse_wheel(event, delta)
+        except Exception:
+            pass
+
+    def _zoom_stop_high_quality(self):
+        """缩放停止后切换回高画质LANCZOS重新渲染"""
+        try:
+            self._zoom_stop_after_id = None
+            self._zoom_quality = Image.LANCZOS
+            self.redraw()
+        except Exception:
             pass
 
     def reset_zoom(self):
