@@ -9398,7 +9398,6 @@ class AnnotationEditor(tk.Toplevel):
         self._user_zoom = 1.0
         self._base_scale = 1.0
         self._img_size = (0, 0)
-        self._orig_img_cache = {}
 
         # 将矩形框转换为四边形4顶点，并初始化每个发票的字段框
         for ann in self.annotations:
@@ -9532,16 +9531,10 @@ class AnnotationEditor(tk.Toplevel):
         try:
             self.canvas.delete('all')
             ann = self.annotations[self.current_idx]
-            # 使用缓存的原始图片
-            img_path = ann['orig_path']
-            if img_path in self._orig_img_cache:
-                orig_img = self._orig_img_cache[img_path]
-            else:
-                try:
-                    orig_img = Image.open(img_path)
-                    self._orig_img_cache[img_path] = orig_img
-                except Exception:
-                    return
+            try:
+                orig_img = Image.open(ann['orig_path'])
+            except Exception:
+                return
             # 使用canvas_frame的大小计算_base_scale，避免滚动条显示/隐藏时大小变化
             frame_w = self.canvas_frame.winfo_width() or 1000
             frame_h = self.canvas_frame.winfo_height() or 600
