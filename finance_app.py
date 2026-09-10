@@ -9394,6 +9394,11 @@ class AnnotationEditor(tk.Toplevel):
         self._photo = None
         self._img_offset = (0, 0)
         self._scale = 1.0
+        # 缩放功能变量
+        self._user_zoom = 1.0
+        self._base_scale = 1.0
+        self._img_size = (0, 0)
+        self._orig_img_cache = {}
 
         # 将矩形框转换为四边形4顶点，并初始化每个发票的字段框
         for ann in self.annotations:
@@ -9456,20 +9461,38 @@ class AnnotationEditor(tk.Toplevel):
         except Exception:
             pass
 
-        # Canvas区域
+        # Canvas区域 - 使用Grid布局支持滚动条
         _canvas_bg = '#000000' if is_dark_theme() else '#FFFFFF'
-        self.canvas = tk.Canvas(self, bg=_canvas_bg, highlightthickness=0)
-        self.canvas.pack(fill='both', expand=True, padx=10, pady=4)
+        self.canvas_frame = ttk.Frame(self)
+        self.canvas_frame.pack(fill='both', expand=True, padx=10, pady=4)
+        self.canvas_frame.grid_rowconfigure(0, weight=1)
+        self.canvas_frame.grid_columnconfigure(0, weight=1)
+        self.canvas = tk.Canvas(self.canvas_frame, bg=_canvas_bg, highlightthickness=0)
+        self.canvas.grid(row=0, column=0, sticky='nsew')
+        # 垂直滚动条（右边，红色框位置）
+        self.v_scrollbar = ttk.Scrollbar(self.canvas_frame, orient='vertical', command=self.canvas.yview)
+        self.v_scrollbar.grid(row=0, column=1, sticky='ns')
+        # 水平滚动条（下边，绿色框位置）
+        self.h_scrollbar = ttk.Scrollbar(self.canvas_frame, orient='horizontal', command=self.canvas.xview)
+        self.h_scrollbar.grid(row=1, column=0, sticky='ew')
+        self.canvas.config(yscrollcommand=self.v_scrollbar.set, xscrollcommand=self.h_scrollbar.set)
+        # 初始隐藏滚动条
+        self.v_scrollbar.grid_remove()
+        self.h_scrollbar.grid_remove()
         self.canvas.bind('<Button-1>', self.on_mouse_down)
         self.canvas.bind('<B1-Motion>', self.on_mouse_drag)
         self.canvas.bind('<ButtonRelease-1>', self.on_mouse_up)
         self.canvas.bind('<Configure>', lambda e: self.redraw())
+        # Ctrl+鼠标滚轮缩放
+        self.canvas.bind('<Control-MouseWheel>', self.on_ctrl_mouse_wheel)
+        self.bind('<Control-MouseWheel>', self.on_ctrl_mouse_wheel)
 
         # 底部按钮
         bottom = ttk.Frame(self)
         bottom.pack(fill='x', padx=10, pady=10)
         self.box_count_label = ttk.Label(bottom, text="")
         self.box_count_label.pack(side='left', padx=10)
+        ttk.Button(bottom, text="🔍 重置缩放", command=self.reset_zoom).pack(side='left', padx=6)
         ttk.Button(bottom, text="取消", command=self.destroy).pack(side='right', padx=6)
         ttk.Button(bottom, text="确认全部并导入", command=self.confirm_all).pack(side='right', padx=6)
         ttk.Button(bottom, text="确认本页并下一页", command=self.confirm_current_and_next).pack(side='right', padx=6)
@@ -9489,30 +9512,100 @@ class AnnotationEditor(tk.Toplevel):
         self.selected_field_edge = -1
         # 记录每个字段框的所有Canvas元素ID，便于直接删除
         self._field_element_ids = {}
+        # 翻页时重置缩放
+        self._user_zoom = 1.0
         self.redraw()
 
     def _to_screen(self, x, y):
         return (self._img_offset[0] + x * self._scale, self._img_offset[1] + y * self._scale)
 
     def _to_img(self, sx, sy):
-        return ((sx - self._img_offset[0]) / self._scale, (sy - self._img_offset[1]) / self._scale)
+        # 考虑滚动位置：使用canvasx/canvasy将屏幕坐标转换为Canvas坐标
+        try:
+            cx = self.canvas.canvasx(sx)
+            cy = self.canvas.canvasy(sy)
+        except Exception:
+            cx, cy = sx, sy
+        return ((cx - self._img_offset[0]) / self._scale, (cy - self._img_offset[1]) / self._scale)
 
     def redraw(self):
         try:
             self.canvas.delete('all')
             ann = self.annotations[self.current_idx]
-            try:
-                orig_img = Image.open(ann['orig_path'])
-            except Exception:
-                return
-            cw = self.canvas.winfo_width() or 1000
-            ch = self.canvas.winfo_height() or 600
-            if cw < 50: cw = 1000
-            if ch < 50: ch = 600
+            # 使用缓存的原始图片
+            img_path = ann['orig_path']
+            if img_path in self._orig_img_cache:
+                orig_img = self._orig_img_cache[img_path]
+            else:
+                try:
+                    orig_img = Image.open(img_path)
+                    self._orig_img_cache[img_path] = orig_img
+                except Exception:
+                    return
+            # 使用canvas_frame的大小计算_base_scale，避免滚动条显示/隐藏时大小变化
+            frame_w = self.canvas_frame.winfo_width() or 1000
+            frame_h = self.canvas_frame.winfo_height() or 600
+            if frame_w < 50: frame_w = 1000
+            if frame_h < 50: frame_h = 600
             iw, ih = orig_img.size
-            self._scale = min(cw / iw, ch / ih, 1.0)
-            dw, dh = int(iw * self._scale), int(ih * self._scale)
-            self._img_offset = ((cw - dw) // 2, (ch - dh) // 2)
+            self._img_size = (iw, ih)
+            # 预留18像素滚动条空间，确保100%时图片不会因为滚动条出现而大小突变
+            SCROLLBAR_SPACE = 18
+            calc_cw = max(1, frame_w - SCROLLBAR_SPACE)
+            calc_ch = max(1, frame_h - SCROLLBAR_SPACE)
+            self._base_scale = min(calc_cw / iw, calc_ch / ih, 1.0)
+            # 总缩放比例 = 基础缩放 × 用户缩放
+            total_scale = self._base_scale * self._user_zoom
+            self._scale = total_scale
+            dw, dh = int(iw * total_scale), int(ih * total_scale)
+            
+            # 先根据frame大小判断是否需要滚动条，更新布局后获取Canvas实际大小
+            need_h = dw > frame_w
+            need_v = dh > frame_h
+            if need_h:
+                self.h_scrollbar.grid()
+            else:
+                self.h_scrollbar.grid_remove()
+            if need_v:
+                self.v_scrollbar.grid()
+            else:
+                self.v_scrollbar.grid_remove()
+            self.canvas.update_idletasks()
+            self.canvas_frame.update_idletasks()
+            actual_cw = self.canvas.winfo_width() or frame_w
+            actual_ch = self.canvas.winfo_height() or frame_h
+            if actual_cw < 50: actual_cw = frame_w
+            if actual_ch < 50: actual_ch = frame_h
+            
+            # 关键：分别处理水平和垂直方向
+            # 未超出的方向居中，超出的方向使用滚动条（偏移0）
+            if dw <= actual_cw:
+                offset_x = (actual_cw - dw) // 2
+                self.h_scrollbar.grid_remove()
+            else:
+                offset_x = 0
+                self.h_scrollbar.grid()
+            if dh <= actual_ch:
+                offset_y = (actual_ch - dh) // 2
+                self.v_scrollbar.grid_remove()
+            else:
+                offset_y = 0
+                self.v_scrollbar.grid()
+            self._img_offset = (offset_x, offset_y)
+            
+            # 设置scrollregion
+            scroll_w = max(dw, actual_cw)
+            scroll_h = max(dh, actual_ch)
+            self.canvas.config(scrollregion=(0, 0, scroll_w, scroll_h))
+            
+            # 如果图片完全未超出窗口，重置视图位置
+            if dw <= actual_cw and dh <= actual_ch:
+                try:
+                    self.canvas.xview_moveto(0)
+                    self.canvas.yview_moveto(0)
+                except Exception:
+                    pass
+            
             resized = orig_img.resize((dw, dh), Image.LANCZOS)
             self._photo = ImageTk.PhotoImage(resized)
             ox, oy = self._img_offset
@@ -9634,6 +9727,77 @@ class AnnotationEditor(tk.Toplevel):
                 inside = not inside
             j = i
         return inside
+
+    def on_ctrl_mouse_wheel(self, event, delta=None):
+        """Ctrl+鼠标滚轮缩放，以鼠标位置为中心"""
+        try:
+            wheel_delta = delta if delta is not None else event.delta
+            if wheel_delta == 0:
+                return
+            old_zoom = self._user_zoom
+            if wheel_delta > 0:
+                new_zoom = min(old_zoom * 1.1, 5.0)
+            else:
+                new_zoom = max(old_zoom / 1.1, 0.2)
+            if abs(new_zoom - old_zoom) < 0.001:
+                return
+            old_total_scale = self._base_scale * old_zoom
+            new_total_scale = self._base_scale * new_zoom
+            # 鼠标对应的图片坐标（考虑滚动位置和_img_offset）
+            try:
+                scroll_x = self.canvas.canvasx(event.x)
+                scroll_y = self.canvas.canvasy(event.y)
+            except Exception:
+                scroll_x, scroll_y = event.x, event.y
+            img_x = (scroll_x - self._img_offset[0]) / old_total_scale
+            img_y = (scroll_y - self._img_offset[1]) / old_total_scale
+            # 缩放后新的图片尺寸
+            frame_w = self.canvas_frame.winfo_width() or 1000
+            frame_h = self.canvas_frame.winfo_height() or 600
+            iw, ih = self._img_size
+            new_dw, new_dh = int(iw * new_total_scale), int(ih * new_total_scale)
+            # 计算新的滚动位置，使鼠标指向的位置保持不变
+            new_scroll_x = max(0.0, min(1.0, (img_x * new_total_scale - event.x) / max(1, new_dw)))
+            new_scroll_y = max(0.0, min(1.0, (img_y * new_total_scale - event.y) / max(1, new_dh)))
+            self._user_zoom = new_zoom
+            self.redraw()
+            self.canvas.update_idletasks()
+            # 设置滚动位置（以鼠标为中心）
+            try:
+                actual_cw = self.canvas.winfo_width() or frame_w
+                actual_ch = self.canvas.winfo_height() or frame_h
+                if new_dw > actual_cw:
+                    self.canvas.xview_moveto(new_scroll_x)
+                if new_dh > actual_ch:
+                    self.canvas.yview_moveto(new_scroll_y)
+            except Exception as e:
+                pass
+            # 显示缩放比例
+            zoom_percent = int(new_zoom * 100)
+            if hasattr(self, 'box_count_label'):
+                current_text = self.box_count_label.cget('text')
+                if '缩放' not in current_text:
+                    self.box_count_label.config(text=current_text + f" | 缩放: {zoom_percent}%")
+        except Exception as e:
+            pass
+
+    def reset_zoom(self):
+        """重置缩放到原始大小（100%）"""
+        try:
+            self._user_zoom = 1.0
+            self.redraw()
+            try:
+                self.canvas.xview_moveto(0)
+                self.canvas.yview_moveto(0)
+            except Exception:
+                pass
+            if hasattr(self, 'box_count_label'):
+                current_text = self.box_count_label.cget('text')
+                if '缩放' in current_text:
+                    idx = current_text.find(' | 缩放')
+                    self.box_count_label.config(text=current_text[:idx])
+        except Exception as e:
+            pass
 
     def on_mouse_down(self, event):
         ann = self.annotations[self.current_idx]
@@ -11325,6 +11489,77 @@ class PaymentListEditor(tk.Toplevel):
             if x1 <= x <= x2 and y1 <= y <= y2:
                 return ('move_box', i, None)
         return (None, -1, None)
+
+    def on_ctrl_mouse_wheel(self, event, delta=None):
+        """Ctrl+鼠标滚轮缩放，以鼠标位置为中心"""
+        try:
+            wheel_delta = delta if delta is not None else event.delta
+            if wheel_delta == 0:
+                return
+            old_zoom = self._user_zoom
+            if wheel_delta > 0:
+                new_zoom = min(old_zoom * 1.1, 5.0)
+            else:
+                new_zoom = max(old_zoom / 1.1, 0.2)
+            if abs(new_zoom - old_zoom) < 0.001:
+                return
+            old_total_scale = self._base_scale * old_zoom
+            new_total_scale = self._base_scale * new_zoom
+            # 鼠标对应的图片坐标（考虑滚动位置和_img_offset）
+            try:
+                scroll_x = self.canvas.canvasx(event.x)
+                scroll_y = self.canvas.canvasy(event.y)
+            except Exception:
+                scroll_x, scroll_y = event.x, event.y
+            img_x = (scroll_x - self._img_offset[0]) / old_total_scale
+            img_y = (scroll_y - self._img_offset[1]) / old_total_scale
+            # 缩放后新的图片尺寸
+            frame_w = self.canvas_frame.winfo_width() or 1000
+            frame_h = self.canvas_frame.winfo_height() or 600
+            iw, ih = self._img_size
+            new_dw, new_dh = int(iw * new_total_scale), int(ih * new_total_scale)
+            # 计算新的滚动位置，使鼠标指向的位置保持不变
+            new_scroll_x = max(0.0, min(1.0, (img_x * new_total_scale - event.x) / max(1, new_dw)))
+            new_scroll_y = max(0.0, min(1.0, (img_y * new_total_scale - event.y) / max(1, new_dh)))
+            self._user_zoom = new_zoom
+            self.redraw()
+            self.canvas.update_idletasks()
+            # 设置滚动位置（以鼠标为中心）
+            try:
+                actual_cw = self.canvas.winfo_width() or frame_w
+                actual_ch = self.canvas.winfo_height() or frame_h
+                if new_dw > actual_cw:
+                    self.canvas.xview_moveto(new_scroll_x)
+                if new_dh > actual_ch:
+                    self.canvas.yview_moveto(new_scroll_y)
+            except Exception as e:
+                pass
+            # 显示缩放比例
+            zoom_percent = int(new_zoom * 100)
+            if hasattr(self, 'box_count_label'):
+                current_text = self.box_count_label.cget('text')
+                if '缩放' not in current_text:
+                    self.box_count_label.config(text=current_text + f" | 缩放: {zoom_percent}%")
+        except Exception as e:
+            pass
+
+    def reset_zoom(self):
+        """重置缩放到原始大小（100%）"""
+        try:
+            self._user_zoom = 1.0
+            self.redraw()
+            try:
+                self.canvas.xview_moveto(0)
+                self.canvas.yview_moveto(0)
+            except Exception:
+                pass
+            if hasattr(self, 'box_count_label'):
+                current_text = self.box_count_label.cget('text')
+                if '缩放' in current_text:
+                    idx = current_text.find(' | 缩放')
+                    self.box_count_label.config(text=current_text[:idx])
+        except Exception as e:
+            pass
 
     def on_mouse_down(self, event):
         x, y = self._get_canvas_coords(event)
