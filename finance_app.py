@@ -4092,6 +4092,12 @@ class InvoiceTab(ScrollableTab):
             if img is None:
                 self._draw_preview_placeholder("无法加载图片")
                 return
+            # 释放旧图片内存，避免频繁切换发票时内存泄露
+            if self._preview_orig_img is not None:
+                try:
+                    self._preview_orig_img.close()
+                except Exception:
+                    pass
             self._preview_orig_img = img
             self._preview_fit()
         except Exception as e:
@@ -9669,6 +9675,11 @@ class AnnotationEditor(tk.Toplevel):
                     self._photo = ImageTk.PhotoImage(orig_img)
                     dw, dh = orig_img.size
                 except Exception:
+                    # 释放orig_img内存
+                    try:
+                        orig_img.close()
+                    except Exception:
+                        pass
                     return
             ox, oy = self._img_offset
             # 直接创建图片元素（delete all后_image_item_id已为None）
