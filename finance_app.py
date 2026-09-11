@@ -10349,20 +10349,23 @@ class AnnotationEditor(tk.Toplevel):
         ann = self.annotations[self.current_idx]
         try:
             img = Image.open(ann['orig_path'])
-            _, boxes = split_invoice_image(img, return_boxes=True)
-            new_boxes = []
-            for box in (boxes if boxes else [(0, 0, ann['img_size'][0], ann['img_size'][1])]):
-                x1, y1, x2, y2 = box
-                new_boxes.append([(x1, y1), (x2, y1), (x2, y2), (x1, y2)])
-            ann['boxes'] = new_boxes
-            ann['field_boxes'] = [{'invoice_number': None, 'date': None, 'amount': None}
-                                   for _ in new_boxes]
-            self.selected_box = -1
-            self.selected_field = None
-            self.selected_vertex = -1
-            self.selected_edge = -1
-            self.selected_field_edge = -1
-            self.redraw()
+            try:
+                _, boxes = split_invoice_image(img, return_boxes=True)
+                new_boxes = []
+                for box in (boxes if boxes else [(0, 0, ann['img_size'][0], ann['img_size'][1])]):
+                    x1, y1, x2, y2 = box
+                    new_boxes.append([(x1, y1), (x2, y1), (x2, y2), (x1, y2)])
+                ann['boxes'] = new_boxes
+                ann['field_boxes'] = [{'invoice_number': None, 'date': None, 'amount': None}
+                                       for _ in new_boxes]
+                self.selected_box = -1
+                self.selected_field = None
+                self.selected_vertex = -1
+                self.selected_edge = -1
+                self.selected_field_edge = -1
+                self.redraw()
+            finally:
+                img.close()
         except Exception as e:
             messagebox.showerror("错误", f"重新分割失败: {e}")
 
@@ -12285,16 +12288,21 @@ class BatchInvoiceTab(ScrollableTab):
                 try:
                     x1, y1, x2, y2 = int(rec['x1']), int(rec['y1']), int(rec['x2']), int(rec['y2'])
                     if x2 - x1 > 20 and y2 - y1 > 20:
-                        cropped = Image.open(image_path).crop((x1, y1, x2, y2))
-                        if cropped.mode != 'RGB':
-                            cropped = cropped.convert('RGB')
-                        timestamp = int(time.time() * 1000)
-                        base = os.path.splitext(os.path.basename(fname))[0][:15]
-                        save_name = f"paylist_{base}_{rec.get('date','')}_{timestamp}.jpg"
-                        save_path = os.path.join(INVOICE_DIR, save_name)
-                        os.makedirs(INVOICE_DIR, exist_ok=True)
-                        cropped.save(save_path, 'JPEG', quality=90)
-                        img_filename = save_name
+                        src_img = Image.open(image_path)
+                        try:
+                            cropped = src_img.crop((x1, y1, x2, y2))
+                            if cropped.mode != 'RGB':
+                                cropped = cropped.convert('RGB')
+                            timestamp = int(time.time() * 1000)
+                            base = os.path.splitext(os.path.basename(fname))[0][:15]
+                            save_name = f"paylist_{base}_{rec.get('date','')}_{timestamp}.jpg"
+                            save_path = os.path.join(INVOICE_DIR, save_name)
+                            os.makedirs(INVOICE_DIR, exist_ok=True)
+                            cropped.save(save_path, 'JPEG', quality=90)
+                            cropped.close()
+                            img_filename = save_name
+                        finally:
+                            src_img.close()
                 except Exception as e:
                     _log_ocr_error(f"裁切记录图片失败: {e}")
                 conn.execute(
@@ -12652,10 +12660,12 @@ class BatchInvoiceTab(ScrollableTab):
             import numpy as np
             imported = 0
             for ann in annotations:
+                orig_img = None
                 try:
                     orig_img = Image.open(ann['orig_path'])
                     default_date = ann.get('default_date', '')
                     for bi, points in enumerate(ann['boxes']):
+                        crop = None
                         try:
                             # 1. 透视裁切发票（红框）
                             crop = perspective_crop(orig_img, points)
@@ -12664,6 +12674,8 @@ class BatchInvoiceTab(ScrollableTab):
                             fname = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_p{ann['page_num']}_{bi+1}.jpg"
                             dst = os.path.join(INVOICE_DIR, fname)
                             crop.save(dst, 'JPEG', quality=92)
+                            crop.close()
+                            crop = None
 
                             # 2. 字段强化OCR（绿框）：裁切每个字段区域，单独OCR后覆盖整体识别结果
                             overrides = {}
@@ -12681,6 +12693,8 @@ class BatchInvoiceTab(ScrollableTab):
                                     tmp_path = os.path.join(INVOICE_DIR, tmp_name)
                                     try:
                                         field_crop.save(tmp_path, 'JPEG', quality=95)
+                                        field_crop.close()
+                                        field_crop = None
                                         f_inv_no, f_texts = ocr_invoice_number(tmp_path)
                                         f_extracted = {}
                                         try:
@@ -12722,6 +12736,12 @@ class BatchInvoiceTab(ScrollableTab):
                         pass
                 except Exception as e:
                     _log_ocr_error(f"确认导入失败 {ann.get('source_file')}: {e}")
+                finally:
+                    if orig_img is not None:
+                        try:
+                            orig_img.close()
+                        except Exception:
+                            pass
 
             def done():
                 try:
@@ -12769,16 +12789,19 @@ class BatchInvoiceTab(ScrollableTab):
                 continue
             try:
                 img = Image.open(path)
-                img.thumbnail((400, 500), Image.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
-                thumbs.append(photo)
-                col = i % 2
-                row = i // 2
-                lbl = tk.Label(frame, image=photo, bg=_preview_bg, cursor='hand2')
-                lbl.grid(row=row, column=col, padx=10, pady=10)
-                lbl.bind('<Button-1>', lambda e, p=path: self._open_full_image(p))
-                tk.Label(frame, text=os.path.basename(path), fg=_preview_fg, bg=_preview_bg,
-                         wraplength=400).grid(row=row + 1, column=col, pady=(0, 10))
+                try:
+                    img.thumbnail((400, 500), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(img)
+                    thumbs.append(photo)
+                    col = i % 2
+                    row = i // 2
+                    lbl = tk.Label(frame, image=photo, bg=_preview_bg, cursor='hand2')
+                    lbl.grid(row=row, column=col, padx=10, pady=10)
+                    lbl.bind('<Button-1>', lambda e, p=path: self._open_full_image(p))
+                    tk.Label(frame, text=os.path.basename(path), fg=_preview_fg, bg=_preview_bg,
+                             wraplength=400).grid(row=row + 1, column=col, pady=(0, 10))
+                finally:
+                    img.close()
             except Exception:
                 pass
         win.configure(bg=_preview_bg)
