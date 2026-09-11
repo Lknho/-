@@ -4140,6 +4140,9 @@ class InvoiceTab(ScrollableTab):
             self.preview_canvas.delete("all")
             x = max(0, (cw - iw) // 2)
             y = max(0, (ch - ih) // 2)
+            # 保存图片偏移，用于以鼠标为中心缩放
+            self._preview_img_x = x
+            self._preview_img_y = y
             self.preview_canvas.create_image(x, y, anchor='nw', image=self._preview_photo)
             self.preview_canvas.configure(scrollregion=(0, 0, max(iw, cw), max(ih, ch)))
             self._zoom_label.config(text=f"{int(self._preview_scale * 100)}%")
@@ -4181,13 +4184,59 @@ class InvoiceTab(ScrollableTab):
         self._render_preview()
 
     def _on_preview_wheel_zoom(self, event):
-        """Ctrl+滚轮缩放"""
+        """Ctrl+滚轮缩放，以鼠标位置为中心"""
         if self._preview_orig_img is None:
             return
-        if event.delta > 0:
-            self._preview_zoom_in()
-        else:
-            self._preview_zoom_out()
+        try:
+            # 获取鼠标在Canvas中的位置（考虑滚动偏移）
+            mouse_cx = self.preview_canvas.canvasx(event.x)
+            mouse_cy = self.preview_canvas.canvasy(event.y)
+            # 计算鼠标在图片中的位置（图片坐标）
+            img_x = (mouse_cx - self._preview_img_x) / self._preview_scale
+            img_y = (mouse_cy - self._preview_img_y) / self._preview_scale
+            # 计算新的缩放比例
+            old_scale = self._preview_scale
+            if event.delta > 0:
+                new_scale = min(old_scale * 1.1, 8.0)
+            else:
+                new_scale = max(old_scale / 1.1, 0.05)
+            if abs(new_scale - old_scale) < 0.001:
+                return
+            self._preview_scale = new_scale
+            # 重新渲染（图片会重新居中，_preview_img_x/y会更新）
+            self._render_preview()
+            # 计算新的滚动位置，使鼠标指向的图片位置保持在鼠标位置
+            ow, oh = self._preview_orig_img.size
+            new_iw = int(ow * new_scale)
+            new_ih = int(oh * new_scale)
+            cw = self.preview_canvas.winfo_width()
+            ch = self.preview_canvas.winfo_height()
+            new_img_x = max(0, (cw - new_iw) // 2)
+            new_img_y = max(0, (ch - new_ih) // 2)
+            # 鼠标指向的图片位置在新缩放下的Canvas坐标
+            target_cx = new_img_x + img_x * new_scale
+            target_cy = new_img_y + img_y * new_scale
+            # 需要的滚动偏移 = 目标位置 - 鼠标位置
+            scroll_dx = target_cx - mouse_cx
+            scroll_dy = target_cy - mouse_cy
+            # 设置滚动位置（使用xview/yview的绝对位置）
+            if new_iw > cw:
+                total_w = max(new_iw, cw)
+                frac = max(0.0, min(1.0, scroll_dx / total_w))
+                self.preview_canvas.xview_moveto(frac)
+            if new_ih > ch:
+                total_h = max(new_ih, ch)
+                frac = max(0.0, min(1.0, scroll_dy / total_h))
+                self.preview_canvas.yview_moveto(frac)
+        except Exception as e:
+            # 缩放失败时回退到简单缩放
+            try:
+                if event.delta > 0:
+                    self._preview_zoom_in()
+                else:
+                    self._preview_zoom_out()
+            except Exception:
+                pass
 
     def _preview_key_scroll(self, dx, dy):
         """键盘滚动预览图片"""
