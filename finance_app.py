@@ -4135,22 +4135,25 @@ class InvoiceTab(ScrollableTab):
             ow, oh = self._preview_orig_img.size
             iw = max(1, int(ow * self._preview_scale))
             ih = max(1, int(oh * self._preview_scale))
-            # 超大图限制渲染尺寸防止卡顿（超过4000px时降采样显示，但滚动范围仍按原图比例）
+            # 超大图限制渲染尺寸防止卡顿（超过4000px时降采样显示）
             disp_iw, disp_ih = iw, ih
             max_render = 4000
             if max(disp_iw, disp_ih) > max_render:
                 r = max_render / max(disp_iw, disp_ih)
                 disp_iw, disp_ih = int(disp_iw * r), int(disp_ih * r)
+            # 实际渲染缩放比例 = 渲染尺寸 / 原图尺寸
+            self._preview_render_scale = disp_iw / ow if ow > 0 else self._preview_scale
             img = self._preview_orig_img.resize((disp_iw, disp_ih), Image.LANCZOS)
             self._preview_photo = ImageTk.PhotoImage(img)
             self.preview_canvas.delete("all")
-            x = max(0, (cw - iw) // 2)
-            y = max(0, (ch - ih) // 2)
+            # 图片位置和scrollregion使用实际渲染尺寸，确保OCR框位置对应
+            x = max(0, (cw - disp_iw) // 2)
+            y = max(0, (ch - disp_ih) // 2)
             # 保存图片偏移，用于以鼠标为中心缩放
             self._preview_img_x = x
             self._preview_img_y = y
             self.preview_canvas.create_image(x, y, anchor='nw', image=self._preview_photo)
-            self.preview_canvas.configure(scrollregion=(0, 0, max(iw, cw), max(ih, ch)))
+            self.preview_canvas.configure(scrollregion=(0, 0, max(disp_iw, cw), max(disp_ih, ch)))
             self._zoom_label.config(text=f"{int(self._preview_scale * 100)}%")
             # 叠加OCR文字框
             self._draw_ocr_overlay()
@@ -4197,9 +4200,10 @@ class InvoiceTab(ScrollableTab):
             # 获取鼠标在Canvas中的位置（考虑滚动偏移）
             mouse_cx = self.preview_canvas.canvasx(event.x)
             mouse_cy = self.preview_canvas.canvasy(event.y)
-            # 计算鼠标在图片中的位置（图片坐标）
-            img_x = (mouse_cx - self._preview_img_x) / self._preview_scale
-            img_y = (mouse_cy - self._preview_img_y) / self._preview_scale
+            # 计算鼠标在图片中的位置（图片坐标），使用实际渲染缩放比例
+            render_scale_old = getattr(self, '_preview_render_scale', self._preview_scale)
+            img_x = (mouse_cx - self._preview_img_x) / render_scale_old
+            img_y = (mouse_cy - self._preview_img_y) / render_scale_old
             # 计算新的缩放比例
             old_scale = self._preview_scale
             if event.delta > 0:
@@ -4213,15 +4217,17 @@ class InvoiceTab(ScrollableTab):
             self._render_preview()
             # 计算新的滚动位置，使鼠标指向的图片位置保持在鼠标位置
             ow, oh = self._preview_orig_img.size
-            new_iw = int(ow * new_scale)
-            new_ih = int(oh * new_scale)
+            # 使用实际渲染缩放比例和渲染尺寸（_render_preview已设置_preview_render_scale）
+            render_scale = getattr(self, '_preview_render_scale', new_scale)
+            new_iw = int(ow * render_scale)
+            new_ih = int(oh * render_scale)
             cw = self.preview_canvas.winfo_width()
             ch = self.preview_canvas.winfo_height()
             new_img_x = max(0, (cw - new_iw) // 2)
             new_img_y = max(0, (ch - new_ih) // 2)
             # 鼠标指向的图片位置在新缩放下的Canvas坐标
-            target_cx = new_img_x + img_x * new_scale
-            target_cy = new_img_y + img_y * new_scale
+            target_cx = new_img_x + img_x * render_scale
+            target_cy = new_img_y + img_y * render_scale
             # 计算滚动位置：希望鼠标窗口坐标(event.x)对应的scrollregion坐标是target_cx
             # xview_moveto(frac)中，可视区域左边界scrollregion坐标=frac*total_w
             # 所以 frac*total_w + event.x = target_cx → frac=(target_cx-event.x)/total_w
@@ -4429,14 +4435,16 @@ class InvoiceTab(ScrollableTab):
             cw = self.preview_canvas.winfo_width()
             ch = self.preview_canvas.winfo_height()
             ow, oh = self._preview_orig_img.size
-            iw = max(1, int(ow * self._preview_scale))
-            ih = max(1, int(oh * self._preview_scale))
+            # 使用实际渲染缩放比例和渲染尺寸，确保OCR框位置与图片对应
+            render_scale = getattr(self, '_preview_render_scale', self._preview_scale)
+            iw = max(1, int(ow * render_scale))
+            ih = max(1, int(oh * render_scale))
             ox = max(0, (cw - iw) // 2)
             oy = max(0, (ch - ih) // 2)
             self._ocr_box_items = []
             self._ocr_img_offset = (ox, oy, ow, oh)
             for idx, (box, text, conf) in enumerate(self._ocr_results):
-                pts = [(ox + p[0] * self._preview_scale, oy + p[1] * self._preview_scale) for p in box]
+                pts = [(ox + p[0] * render_scale, oy + p[1] * render_scale) for p in box]
                 flat = [c for pt in pts for c in pt]
                 if idx in self._ocr_selected:
                     color = '#22C55E'  # 绿色选中
@@ -4454,8 +4462,9 @@ class InvoiceTab(ScrollableTab):
     def _canvas_to_img(self, cx, cy):
         """Canvas坐标转原图坐标"""
         ox, oy, ow, oh = self._ocr_img_offset
-        ix = (cx - ox) / self._preview_scale
-        iy = (cy - oy) / self._preview_scale
+        render_scale = getattr(self, '_preview_render_scale', self._preview_scale)
+        ix = (cx - ox) / render_scale
+        iy = (cy - oy) / render_scale
         return ix, iy
 
     def _box_at_img_point(self, ix, iy):
