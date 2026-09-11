@@ -9856,6 +9856,13 @@ class AnnotationEditor(tk.Toplevel):
     def on_mouse_down(self, event):
         ann = self.annotations[self.current_idx]
         ix, iy = self._to_img(event.x, event.y)
+        # 关键修复：将窗口坐标转换为Canvas坐标，用于和_to_screen()的结果比较
+        # 当滚动条出现时，窗口坐标和Canvas坐标不一致，必须统一用Canvas坐标
+        try:
+            cx = self.canvas.canvasx(event.x)
+            cy = self.canvas.canvasy(event.y)
+        except Exception:
+            cx, cy = event.x, event.y
 
         # 1. 检查是否点击选中绿框的顶点
         if self.selected_field is not None:
@@ -9864,7 +9871,7 @@ class AnnotationEditor(tk.Toplevel):
             if fpoints:
                 for vi, (px, py) in enumerate(fpoints):
                     sx, sy = self._to_screen(px, py)
-                    if abs(event.x - sx) <= self.VERTEX_SIZE and abs(event.y - sy) <= self.VERTEX_SIZE:
+                    if abs(cx - sx) <= self.VERTEX_SIZE and abs(cy - sy) <= self.VERTEX_SIZE:
                         self.selected_vertex = vi
                         self.selected_edge = -1
                         self.selected_field_edge = -1
@@ -9877,7 +9884,7 @@ class AnnotationEditor(tk.Toplevel):
                     mx = (fpoints[a][0] + fpoints[b][0]) / 2
                     my = (fpoints[a][1] + fpoints[b][1]) / 2
                     sx, sy = self._to_screen(mx, my)
-                    if abs(event.x - sx) <= self.VERTEX_SIZE + 2 and abs(event.y - sy) <= self.VERTEX_SIZE + 2:
+                    if abs(cx - sx) <= self.VERTEX_SIZE + 2 and abs(cy - sy) <= self.VERTEX_SIZE + 2:
                         self.selected_field_edge = ei
                         self.selected_vertex = -1
                         self.selected_edge = -1
@@ -9891,7 +9898,7 @@ class AnnotationEditor(tk.Toplevel):
             points = ann['boxes'][self.selected_box]
             for vi, (px, py) in enumerate(points):
                 sx, sy = self._to_screen(px, py)
-                if abs(event.x - sx) <= self.VERTEX_SIZE and abs(event.y - sy) <= self.VERTEX_SIZE:
+                if abs(cx - sx) <= self.VERTEX_SIZE and abs(cy - sy) <= self.VERTEX_SIZE:
                     self.selected_vertex = vi
                     self.selected_edge = -1
                     self.drag_start = (event.x, event.y)
@@ -9904,7 +9911,7 @@ class AnnotationEditor(tk.Toplevel):
                 mx = (points[a][0] + points[b][0]) / 2
                 my = (points[a][1] + points[b][1]) / 2
                 sx, sy = self._to_screen(mx, my)
-                if abs(event.x - sx) <= self.VERTEX_SIZE + 2 and abs(event.y - sy) <= self.VERTEX_SIZE + 2:
+                if abs(cx - sx) <= self.VERTEX_SIZE + 2 and abs(cy - sy) <= self.VERTEX_SIZE + 2:
                     self.selected_edge = ei
                     self.selected_vertex = -1
                     self.drag_start = (event.x, event.y)
