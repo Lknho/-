@@ -9401,7 +9401,6 @@ class AnnotationEditor(tk.Toplevel):
         # 缩放画质控制：缩放过程中用NEAREST（快），停止后用LANCZOS（清晰）
         self._zoom_quality = Image.LANCZOS
         self._zoom_stop_after_id = None
-        self._last_redraw_time = 0
         # 防止放大卡死：限制缩放后图片最大像素尺寸
         self._MAX_ZOOM_PIXELS = 4096  # 最大边不超过4096像素
         self._image_item_id = None  # 跟踪图片元素ID，用于itemconfig更新
@@ -9757,19 +9756,9 @@ class AnnotationEditor(tk.Toplevel):
     def on_ctrl_mouse_wheel(self, event, delta=None):
         """Ctrl+鼠标滚轮缩放，以鼠标位置为中心"""
         try:
-            import time
             wheel_delta = delta if delta is not None else event.delta
             if wheel_delta == 0:
                 return
-            # 节流：限制最大重绘频率为60fps（16ms）
-            now = time.time()
-            if now - self._last_redraw_time < 0.016:
-                # 频率限制内，保存参数稍后执行
-                self._pending_wheel_event = (event, delta)
-                if self._zoom_stop_after_id is None:
-                    self._zoom_stop_after_id = self.after(16, self._flush_pending_wheel)
-                return
-            self._last_redraw_time = now
             # 缩放过程中切换到快速画质NEAREST
             self._zoom_quality = Image.NEAREST
             # 取消之前的停止后高画质重绘
@@ -9833,17 +9822,6 @@ class AnnotationEditor(tk.Toplevel):
         except Exception as e:
             pass
 
-    def _flush_pending_wheel(self):
-        """执行待处理的滚轮事件（节流补充）"""
-        try:
-            self._zoom_stop_after_id = None
-            if hasattr(self, '_pending_wheel_event') and self._pending_wheel_event is not None:
-                event, delta = self._pending_wheel_event
-                self._pending_wheel_event = None
-                self.on_ctrl_mouse_wheel(event, delta)
-        except Exception:
-            pass
-
     def _zoom_stop_high_quality(self):
         """缩放停止后切换回高画质LANCZOS重新渲染"""
         try:
@@ -9856,6 +9834,14 @@ class AnnotationEditor(tk.Toplevel):
     def reset_zoom(self):
         """重置缩放到原始大小（100%）"""
         try:
+            # 取消待处理的高画质重绘，避免重复redraw
+            if self._zoom_stop_after_id is not None:
+                try:
+                    self.after_cancel(self._zoom_stop_after_id)
+                except Exception:
+                    pass
+                self._zoom_stop_after_id = None
+            self._zoom_quality = Image.LANCZOS
             self._user_zoom = 1.0
             self.redraw()
             try:
@@ -11565,19 +11551,9 @@ class PaymentListEditor(tk.Toplevel):
     def on_ctrl_mouse_wheel(self, event, delta=None):
         """Ctrl+鼠标滚轮缩放，以鼠标位置为中心"""
         try:
-            import time
             wheel_delta = delta if delta is not None else event.delta
             if wheel_delta == 0:
                 return
-            # 节流：限制最大重绘频率为60fps（16ms）
-            now = time.time()
-            if now - self._last_redraw_time < 0.016:
-                # 频率限制内，保存参数稍后执行
-                self._pending_wheel_event = (event, delta)
-                if self._zoom_stop_after_id is None:
-                    self._zoom_stop_after_id = self.after(16, self._flush_pending_wheel)
-                return
-            self._last_redraw_time = now
             # 缩放过程中切换到快速画质NEAREST
             self._zoom_quality = Image.NEAREST
             # 取消之前的停止后高画质重绘
@@ -11641,17 +11617,6 @@ class PaymentListEditor(tk.Toplevel):
         except Exception as e:
             pass
 
-    def _flush_pending_wheel(self):
-        """执行待处理的滚轮事件（节流补充）"""
-        try:
-            self._zoom_stop_after_id = None
-            if hasattr(self, '_pending_wheel_event') and self._pending_wheel_event is not None:
-                event, delta = self._pending_wheel_event
-                self._pending_wheel_event = None
-                self.on_ctrl_mouse_wheel(event, delta)
-        except Exception:
-            pass
-
     def _zoom_stop_high_quality(self):
         """缩放停止后切换回高画质LANCZOS重新渲染"""
         try:
@@ -11664,6 +11629,14 @@ class PaymentListEditor(tk.Toplevel):
     def reset_zoom(self):
         """重置缩放到原始大小（100%）"""
         try:
+            # 取消待处理的高画质重绘，避免重复redraw
+            if self._zoom_stop_after_id is not None:
+                try:
+                    self.after_cancel(self._zoom_stop_after_id)
+                except Exception:
+                    pass
+                self._zoom_stop_after_id = None
+            self._zoom_quality = Image.LANCZOS
             self._user_zoom = 1.0
             self.redraw()
             try:
