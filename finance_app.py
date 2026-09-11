@@ -9402,6 +9402,9 @@ class AnnotationEditor(tk.Toplevel):
         self._zoom_quality = Image.LANCZOS
         self._zoom_stop_after_id = None
         self._last_redraw_time = 0
+        # 防止放大卡死：限制缩放后图片最大像素尺寸
+        self._MAX_ZOOM_PIXELS = 4096  # 最大边不超过4096像素
+        self._image_item_id = None  # 跟踪图片元素ID，用于itemconfig更新
 
         # 将矩形框转换为四边形4顶点，并初始化每个发票的字段框
         for ann in self.annotations:
@@ -9515,8 +9518,9 @@ class AnnotationEditor(tk.Toplevel):
         self.selected_field_edge = -1
         # 记录每个字段框的所有Canvas元素ID，便于直接删除
         self._field_element_ids = {}
-        # 翻页时重置缩放
+        # 翻页时重置缩放和图片元素ID
         self._user_zoom = 1.0
+        self._image_item_id = None
         self.redraw()
 
     def _to_screen(self, x, y):
@@ -9533,7 +9537,15 @@ class AnnotationEditor(tk.Toplevel):
 
     def redraw(self):
         try:
-            self.canvas.delete('all')
+            # 不删除图片元素，只删除其他元素（红框/绿框/文字等），减少闪烁
+            if self._image_item_id is not None:
+                # 删除除图片外的所有元素
+                all_items = self.canvas.find_all()
+                for item in all_items:
+                    if item != self._image_item_id:
+                        self.canvas.delete(item)
+            else:
+                self.canvas.delete('all')
             ann = self.annotations[self.current_idx]
             try:
                 orig_img = Image.open(ann['orig_path'])
@@ -9603,10 +9615,27 @@ class AnnotationEditor(tk.Toplevel):
                 except Exception:
                     pass
             
-            resized = orig_img.resize((dw, dh), self._zoom_quality)
-            self._photo = ImageTk.PhotoImage(resized)
+            # 图片缩放：添加try-except保护，防止大尺寸图片导致崩溃
+            try:
+                resized = orig_img.resize((dw, dh), self._zoom_quality)
+                self._photo = ImageTk.PhotoImage(resized)
+            except Exception as e:
+                # 图片缩放失败（可能是尺寸过大），使用原始尺寸或跳过
+                try:
+                    self._photo = ImageTk.PhotoImage(orig_img)
+                    dw, dh = orig_img.size
+                except Exception:
+                    return
             ox, oy = self._img_offset
-            self.canvas.create_image(ox, oy, anchor='nw', image=self._photo)
+            # 使用itemconfig更新图片而不是删除重建，减少闪烁
+            if self._image_item_id is not None:
+                try:
+                    self.canvas.coords(self._image_item_id, ox, oy)
+                    self.canvas.itemconfig(self._image_item_id, image=self._photo)
+                except Exception:
+                    self._image_item_id = self.canvas.create_image(ox, oy, anchor='nw', image=self._photo)
+            else:
+                self._image_item_id = self.canvas.create_image(ox, oy, anchor='nw', image=self._photo)
 
             for i, points in enumerate(ann['boxes']):
                 screen_pts = []
@@ -9757,6 +9786,12 @@ class AnnotationEditor(tk.Toplevel):
             else:
                 new_zoom = max(old_zoom / 1.1, 0.2)
             if abs(new_zoom - old_zoom) < 0.001:
+                return
+            # 防止放大卡死：限制缩放后图片最大像素尺寸
+            iw, ih = self._img_size
+            max_pixel = max(iw, ih) * self._base_scale * new_zoom
+            if max_pixel > self._MAX_ZOOM_PIXELS and wheel_delta > 0:
+                # 已达最大尺寸，不允许继续放大
                 return
             old_total_scale = self._base_scale * old_zoom
             new_total_scale = self._base_scale * new_zoom
@@ -11559,6 +11594,12 @@ class PaymentListEditor(tk.Toplevel):
             else:
                 new_zoom = max(old_zoom / 1.1, 0.2)
             if abs(new_zoom - old_zoom) < 0.001:
+                return
+            # 防止放大卡死：限制缩放后图片最大像素尺寸
+            iw, ih = self._img_size
+            max_pixel = max(iw, ih) * self._base_scale * new_zoom
+            if max_pixel > self._MAX_ZOOM_PIXELS and wheel_delta > 0:
+                # 已达最大尺寸，不允许继续放大
                 return
             old_total_scale = self._base_scale * old_zoom
             new_total_scale = self._base_scale * new_zoom
