@@ -4216,17 +4216,16 @@ class InvoiceTab(ScrollableTab):
             # 鼠标指向的图片位置在新缩放下的Canvas坐标
             target_cx = new_img_x + img_x * new_scale
             target_cy = new_img_y + img_y * new_scale
-            # 需要的滚动偏移 = 目标位置 - 鼠标位置
-            scroll_dx = target_cx - mouse_cx
-            scroll_dy = target_cy - mouse_cy
-            # 设置滚动位置（使用xview/yview的绝对位置）
+            # 计算滚动位置：希望鼠标窗口坐标(event.x)对应的scrollregion坐标是target_cx
+            # xview_moveto(frac)中，可视区域左边界scrollregion坐标=frac*total_w
+            # 所以 frac*total_w + event.x = target_cx → frac=(target_cx-event.x)/total_w
             if new_iw > cw:
                 total_w = max(new_iw, cw)
-                frac = max(0.0, min(1.0, scroll_dx / total_w))
+                frac = max(0.0, min(1.0, (target_cx - event.x) / total_w))
                 self.preview_canvas.xview_moveto(frac)
             if new_ih > ch:
                 total_h = max(new_ih, ch)
-                frac = max(0.0, min(1.0, scroll_dy / total_h))
+                frac = max(0.0, min(1.0, (target_cy - event.y) / total_h))
                 self.preview_canvas.yview_moveto(frac)
         except Exception as e:
             # 缩放失败时回退到简单缩放
