@@ -4313,9 +4313,10 @@ class InvoiceTab(ScrollableTab):
             # 压缩大图
             max_side = 3000
             w, h = img.size
+            ocr_ratio = 1.0
             if max(w, h) > max_side:
-                ratio = max_side / max(w, h)
-                img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+                ocr_ratio = max_side / max(w, h)
+                img = img.resize((int(w * ocr_ratio), int(h * ocr_ratio)), Image.LANCZOS)
             tmp_path = os.path.join(tempfile.gettempdir(),
                                     f"prev_ocr_{os.getpid()}_{int(time.time()*1000)}.jpg")
             img.save(tmp_path, 'JPEG', quality=95)
@@ -4325,6 +4326,14 @@ class InvoiceTab(ScrollableTab):
             except Exception:
                 pass
             if result:
+                # 将OCR结果的坐标转换回原始图片坐标（OCR在压缩后图片上运行）
+                if ocr_ratio != 1.0:
+                    converted = []
+                    for line in result:
+                        box = line[0]
+                        converted_box = [(p[0] / ocr_ratio, p[1] / ocr_ratio) for p in box]
+                        converted.append((converted_box, line[1], line[2]))
+                    return converted
                 return [(line[0], line[1], line[2]) for line in result]
             return []
         except Exception as e:
