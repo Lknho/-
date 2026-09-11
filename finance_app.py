@@ -9403,7 +9403,8 @@ class AnnotationEditor(tk.Toplevel):
         self._zoom_stop_after_id = None
         # 防止放大卡死：限制缩放后图片最大像素尺寸
         self._MAX_ZOOM_PIXELS = 4096  # 最大边不超过4096像素
-        self._image_item_id = None  # 跟踪图片元素ID，用于itemconfig更新
+        self._image_item_id = None  # 跟踪图片元素ID
+        self._redrawing = False  # 重入保护，防止redraw递归调用导致闪退
 
         # 将矩形框转换为四边形4顶点，并初始化每个发票的字段框
         for ann in self.annotations:
@@ -9536,15 +9537,13 @@ class AnnotationEditor(tk.Toplevel):
 
     def redraw(self):
         try:
-            # 不删除图片元素，只删除其他元素（红框/绿框/文字等），减少闪烁
-            if self._image_item_id is not None:
-                # 删除除图片外的所有元素
-                all_items = self.canvas.find_all()
-                for item in all_items:
-                    if item != self._image_item_id:
-                        self.canvas.delete(item)
-            else:
-                self.canvas.delete('all')
+            # 重入保护：防止递归调用导致闪退
+            if self._redrawing:
+                return
+            self._redrawing = True
+            # 删除所有元素（包括图片），重新创建更稳定，避免itemconfig在Tkinter中的bug
+            self.canvas.delete('all')
+            self._image_item_id = None
             ann = self.annotations[self.current_idx]
             try:
                 orig_img = Image.open(ann['orig_path'])
@@ -9578,8 +9577,6 @@ class AnnotationEditor(tk.Toplevel):
                 self.v_scrollbar.grid()
             else:
                 self.v_scrollbar.grid_remove()
-            self.canvas.update_idletasks()
-            self.canvas_frame.update_idletasks()
             actual_cw = self.canvas.winfo_width() or frame_w
             actual_ch = self.canvas.winfo_height() or frame_h
             if actual_cw < 50: actual_cw = frame_w
@@ -9626,15 +9623,8 @@ class AnnotationEditor(tk.Toplevel):
                 except Exception:
                     return
             ox, oy = self._img_offset
-            # 使用itemconfig更新图片而不是删除重建，减少闪烁
-            if self._image_item_id is not None:
-                try:
-                    self.canvas.coords(self._image_item_id, ox, oy)
-                    self.canvas.itemconfig(self._image_item_id, image=self._photo)
-                except Exception:
-                    self._image_item_id = self.canvas.create_image(ox, oy, anchor='nw', image=self._photo)
-            else:
-                self._image_item_id = self.canvas.create_image(ox, oy, anchor='nw', image=self._photo)
+            # 直接创建图片元素（delete all后_image_item_id已为None）
+            self._image_item_id = self.canvas.create_image(ox, oy, anchor='nw', image=self._photo)
 
             for i, points in enumerate(ann['boxes']):
                 screen_pts = []
@@ -9739,6 +9729,9 @@ class AnnotationEditor(tk.Toplevel):
 
         except Exception as e:
             _log_ocr_error(f"人工确认编辑器redraw失败: {e}")
+        finally:
+            self._redrawing = False
+
 
     def _point_in_polygon(self, px, py, points):
         """判断点是否在多边形内（射线法）"""
@@ -9802,7 +9795,6 @@ class AnnotationEditor(tk.Toplevel):
             new_scroll_y = max(0.0, min(1.0, (img_y * new_total_scale - event.y) / max(1, new_dh)))
             self._user_zoom = new_zoom
             self.redraw()
-            self.canvas.update_idletasks()
             # 设置滚动位置（以鼠标为中心）
             try:
                 actual_cw = self.canvas.winfo_width() or frame_w
@@ -9826,6 +9818,10 @@ class AnnotationEditor(tk.Toplevel):
         """缩放停止后切换回高画质LANCZOS重新渲染"""
         try:
             self._zoom_stop_after_id = None
+            # 重入检查：如果正在redraw，延迟100ms再试
+            if self._redrawing:
+                self._zoom_stop_after_id = self.after(100, self._zoom_stop_high_quality)
+                return
             self._zoom_quality = Image.LANCZOS
             self.redraw()
         except Exception:
@@ -11597,7 +11593,6 @@ class PaymentListEditor(tk.Toplevel):
             new_scroll_y = max(0.0, min(1.0, (img_y * new_total_scale - event.y) / max(1, new_dh)))
             self._user_zoom = new_zoom
             self.redraw()
-            self.canvas.update_idletasks()
             # 设置滚动位置（以鼠标为中心）
             try:
                 actual_cw = self.canvas.winfo_width() or frame_w
@@ -11621,6 +11616,10 @@ class PaymentListEditor(tk.Toplevel):
         """缩放停止后切换回高画质LANCZOS重新渲染"""
         try:
             self._zoom_stop_after_id = None
+            # 重入检查：如果正在redraw，延迟100ms再试
+            if self._redrawing:
+                self._zoom_stop_after_id = self.after(100, self._zoom_stop_high_quality)
+                return
             self._zoom_quality = Image.LANCZOS
             self.redraw()
         except Exception:
