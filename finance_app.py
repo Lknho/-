@@ -7852,23 +7852,40 @@ class SalaryTab(ScrollableTab):
         self.app.set_status("已删除发放记录")
 
     def export_excel(self):
-        """导出当月工资结算到Excel"""
+        """导出工资结算到Excel（支持单月和全年）"""
         try:
             year = int(self.year_var.get())
-            month = int(self.month_var.get())
         except ValueError:
-            messagebox.showwarning("提示", "请先选择年份和月份")
+            messagebox.showwarning("提示", "请先选择年份")
             return
+        month_sel = self.month_var.get()
+        is_full_year = (month_sel == '全年')
+        if not is_full_year:
+            try:
+                month = int(month_sel)
+            except ValueError:
+                messagebox.showwarning("提示", "请先选择月份")
+                return
 
         conn = get_db()
         emps = conn.execute("SELECT * FROM employees ORDER BY id").fetchall()
-        payments = conn.execute("""SELECT p.*, e.name FROM salary_payments p
-                                   LEFT JOIN employees e ON p.employee_id=e.id
-                                   WHERE p.year=? AND p.month=? ORDER BY p.id DESC""",
-                                (year, month)).fetchall()
+        if is_full_year:
+            payments = conn.execute("""SELECT p.*, e.name FROM salary_payments p
+                                       LEFT JOIN employees e ON p.employee_id=e.id
+                                       WHERE p.year=? ORDER BY p.month DESC, p.id DESC""",
+                                    (year,)).fetchall()
+            period_label = f"{year}年度"
+            sheet1_title = "年度薪资结算"
+        else:
+            payments = conn.execute("""SELECT p.*, e.name FROM salary_payments p
+                                       LEFT JOIN employees e ON p.employee_id=e.id
+                                       WHERE p.year=? AND p.month=? ORDER BY p.id DESC""",
+                                    (year, month)).fetchall()
+            period_label = f"{year}年{month:02d}月"
+            sheet1_title = "当月薪资结算"
         conn.close()
 
-        default_name = f"工资结算_{year}年{month:02d}月_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        default_name = f"工资结算_{period_label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         path = filedialog.asksaveasfilename(
             title="导出Excel", defaultextension=".xlsx",
             initialfile=default_name,
@@ -7880,10 +7897,10 @@ class SalaryTab(ScrollableTab):
 
         # ===== Sheet1: 当月薪资结算 =====
         ws1 = wb.active
-        ws1.title = "当月薪资结算"
+        ws1.title = sheet1_title
 
         ws1.merge_cells('A1:E1')
-        ws1['A1'] = f"{year}年{month:02d}月 薪资结算表"
+        ws1['A1'] = f"{period_label} 薪资结算表"
         ws1['A1'].font = TITLE_FONT
         ws1['A1'].alignment = CENTER
         ws1.row_dimensions[1].height = 28
@@ -7903,11 +7920,17 @@ class SalaryTab(ScrollableTab):
         total_unpaid = 0
         for idx, e in enumerate(emps, 4):
             conn = get_db()
-            paid = conn.execute("""SELECT COALESCE(SUM(amount),0) s FROM salary_payments
-                                   WHERE employee_id=? AND year=? AND month=?""",
-                                (e['id'], year, month)).fetchone()['s']
+            if is_full_year:
+                paid = conn.execute("""SELECT COALESCE(SUM(amount),0) s FROM salary_payments
+                                       WHERE employee_id=? AND year=?""",
+                                    (e['id'], year)).fetchone()['s']
+                payable = sum(get_monthly_salary(e['id'], year, m) for m in range(1, 13))
+            else:
+                paid = conn.execute("""SELECT COALESCE(SUM(amount),0) s FROM salary_payments
+                                       WHERE employee_id=? AND year=? AND month=?""",
+                                    (e['id'], year, month)).fetchone()['s']
+                payable = get_monthly_salary(e['id'], year, month)
             conn.close()
-            payable = get_monthly_salary(e['id'], year, month)
             unpaid = payable - paid
             ws1.cell(row=idx, column=1, value=e['id']).alignment = CENTER
             ws1.cell(row=idx, column=2, value=e['name']).alignment = CENTER
@@ -7942,7 +7965,7 @@ class SalaryTab(ScrollableTab):
         # ===== Sheet2: 发放记录 =====
         ws2 = wb.create_sheet("发放记录")
         ws2.merge_cells('A1:F1')
-        ws2['A1'] = f"{year}年{month:02d}月 工资发放记录"
+        ws2['A1'] = f"{period_label} 工资发放记录"
         ws2['A1'].font = TITLE_FONT
         ws2['A1'].alignment = CENTER
         ws2.row_dimensions[1].height = 28
@@ -7984,10 +8007,63 @@ class SalaryTab(ScrollableTab):
         _auto_width(ws2, len(headers2))
         ws2.freeze_panes = 'A3'
 
+        # ===== Sheet3: 按月度汇总（仅全年导出时） =====
+        if is_full_year:
+            ws3 = wb.create_sheet("按月度汇总")
+            ws3.merge_cells('A1:D1')
+            ws3['A1'] = f"{year}年度 工资发放按月汇总"
+            ws3['A1'].font = TITLE_FONT
+            ws3['A1'].alignment = CENTER
+            ws3.row_dimensions[1].height = 28
+
+            headers3 = ['月份', '发放笔数', '发放金额(元)', '备注']
+            for c, h in enumerate(headers3, 1):
+                ws3.cell(row=2, column=c, value=h)
+            _style_header(ws3, 2, len(headers3))
+
+            conn = get_db()
+            monthly_stats = conn.execute("""SELECT month, COUNT(*) as cnt, COALESCE(SUM(amount),0) as total
+                                             FROM salary_payments WHERE year=? GROUP BY month ORDER BY month""",
+                                          (year,)).fetchall()
+            conn.close()
+
+            month_total_all = 0
+            month_cnt_all = 0
+            for idx, ms in enumerate(monthly_stats, 3):
+                ws3.cell(row=idx, column=1, value=f"{ms['month']:02d}月").alignment = CENTER
+                ws3.cell(row=idx, column=2, value=ms['cnt']).alignment = CENTER
+                cell = ws3.cell(row=idx, column=3, value=float(ms['total']))
+                cell.number_format = '#,##0.00'
+                cell.alignment = RIGHT
+                ws3.cell(row=idx, column=4, value='').alignment = LEFT
+                for c in range(1, 5):
+                    ws3.cell(row=idx, column=c).border = THIN_BORDER
+                month_total_all += float(ms['total'])
+                month_cnt_all += ms['cnt']
+
+            tr3 = len(monthly_stats) + 3
+            ws3.merge_cells(f'A{tr3}:B{tr3}')
+            ws3.cell(row=tr3, column=1, value=f"合计（共{month_cnt_all}笔）").font = TOTAL_FONT
+            ws3.cell(row=tr3, column=1).alignment = RIGHT
+            ws3.cell(row=tr3, column=1).fill = TOTAL_FILL
+            cell = ws3.cell(row=tr3, column=3, value=month_total_all)
+            cell.number_format = '#,##0.00'
+            cell.font = TOTAL_FONT
+            cell.fill = TOTAL_FILL
+            cell.alignment = RIGHT
+            for c in range(1, 5):
+                ws3.cell(row=tr3, column=c).border = THIN_BORDER
+
+            _auto_width(ws3, len(headers3))
+            ws3.freeze_panes = 'A3'
+
         try:
             wb.save(path)
             self.app.set_status(f"已导出Excel: {os.path.basename(path)}")
-            messagebox.showinfo("导出成功", f"已导出工资结算表到：\n{path}")
+            if is_full_year:
+                messagebox.showinfo("导出成功", f"已导出{period_label}工资结算表到：\n{path}\n\n包含3个工作表：年度薪资结算、发放记录、按月度汇总")
+            else:
+                messagebox.showinfo("导出成功", f"已导出{period_label}工资结算表到：\n{path}")
         except Exception as e:
             messagebox.showerror("导出失败", str(e))
 
