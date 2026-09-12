@@ -5681,9 +5681,9 @@ class InvoiceTab(ScrollableTab):
                     return
             conn.execute("""INSERT INTO invoices(invoice_number, type, invoice_date, reimburser_id, amount,
                           purpose, voucher_number, bank_account_id, image_path, status, created_at, seller, remark)
-                          VALUES(?,?,?,?,?,?,?,?,?,?,0,?,?)""",
+                          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                          (inv_no, inv_type, inv_date, emp_id, amount, purpose, voucher, bank_id, img_path,
-                          datetime.now().strftime('%Y-%m-%d %H:%M:%S'), seller, remark))
+                          0, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), seller, remark))
             conn.commit()
             conn.close()
             self.app.set_status(f"已添加{inv_type}: {inv_no or '(无号)'} 金额 {fmt_money(amount)}")
@@ -6080,8 +6080,11 @@ class InvoiceTab(ScrollableTab):
         _img_refs = []  # 保持图片对象引用，防止被GC回收
 
         for idx, r in enumerate(rows, 4):
+            seq = idx - 3  # 连续序号，从1开始
             status = '已报销' if r['status'] == 1 else '未报销'
-            ws.cell(row=idx, column=1, value=r['id']).alignment = CENTER
+            # 处理created_at为0或无效值的情况
+            created_at = r['created_at'] if r['created_at'] and r['created_at'] != '0' else ''
+            ws.cell(row=idx, column=1, value=seq).alignment = CENTER
             ws.cell(row=idx, column=2, value=r['type'] or '发票').alignment = CENTER
             ws.cell(row=idx, column=3, value=r['invoice_number'] or '').alignment = CENTER
             ws.cell(row=idx, column=4, value=r['invoice_date'] or '').alignment = CENTER
@@ -6094,7 +6097,7 @@ class InvoiceTab(ScrollableTab):
             ws.cell(row=idx, column=9, value=r['remark'] or '').alignment = LEFT
             ws.cell(row=idx, column=10, value=r['voucher_number'] or '').alignment = CENTER
             ws.cell(row=idx, column=11, value=status).alignment = CENTER
-            ws.cell(row=idx, column=12, value=r['created_at'] or '').alignment = CENTER
+            ws.cell(row=idx, column=12, value=created_at).alignment = CENTER
             for c in range(1, NCOLS + 1):
                 ws.cell(row=idx, column=c).border = THIN_BORDER
 
@@ -12309,12 +12312,13 @@ class BatchInvoiceTab(ScrollableTab):
                     "INSERT INTO invoices(invoice_number, type, invoice_date, "
                     "reimburser_id, amount, purpose, voucher_number, bank_account_id, "
                     "image_path, status, created_at, seller, remark, batch_pending) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,0,?,?,1)",
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
                     ('', '支付记录', rec.get('date', ''), None,
                      float(rec.get('amount', 0) or 0),
                      rec.get('remark', '') or '',
                      None, None, img_filename,
-                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                     0,  # status=0 未报销
+                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # created_at
                      rec.get('merchant', ''), rec.get('remark', '')))
                 saved += 1
             conn.commit()
@@ -12556,10 +12560,10 @@ class BatchInvoiceTab(ScrollableTab):
         try:
             conn.execute("""INSERT INTO invoices(invoice_number, type, invoice_date, reimburser_id, amount,
                           purpose, voucher_number, bank_account_id, image_path, status, created_at, seller, remark, batch_pending)
-                          VALUES(?,?,?,?,?,?,?,?,?,?,0,?,?,1)""",
+                          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
                          (inv_no or '', inv_type, inv_date, None, amount,
                           '', None, None, img_filename,
-                          datetime.now().strftime('%Y-%m-%d %H:%M:%S'), seller, remark))
+                          0, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), seller, remark))
             conn.commit()
         finally:
             conn.close()
