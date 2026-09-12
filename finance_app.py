@@ -6021,16 +6021,19 @@ class InvoiceTab(ScrollableTab):
         ImageViewer(self, p, row, invoice_id=row['id'])
 
     def export_excel(self):
-        """导出发票报销明细到Excel（含发票图片），有勾选时只导出勾选的记录"""
+        """导出发票报销明细到Excel（含发票图片），必须勾选后才能导出"""
+        # 必须勾选后才能导出
+        if not hasattr(self, 'checked_ids') or not self.checked_ids:
+            messagebox.showinfo("提示", "请先勾选需要导出的发票，再点击导出Excel")
+            return
         conn = get_db()
         sql = """SELECT i.*, e.name as rname FROM invoices i
                  LEFT JOIN employees e ON i.reimburser_id=e.id WHERE 1=1"""
         params = []
-        # 如果有勾选的记录，只导出勾选的
-        if hasattr(self, 'checked_ids') and self.checked_ids:
-            placeholders = ','.join(['?'] * len(self.checked_ids))
-            sql += f" AND i.id IN ({placeholders})"
-            params.extend(list(self.checked_ids))
+        # 只导出勾选的记录
+        placeholders = ','.join(['?'] * len(self.checked_ids))
+        sql += f" AND i.id IN ({placeholders})"
+        params.extend(list(self.checked_ids))
         if self.filter_status.get() == '未报销':
             sql += " AND i.status=0"
         elif self.filter_status.get() == '已报销':
