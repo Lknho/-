@@ -7564,8 +7564,8 @@ class SalaryTab(ScrollableTab):
                      state='readonly').pack(side='left', padx=4)
         ttk.Label(top, text="月份:").pack(side='left', padx=4)
         self.month_var = tk.StringVar(value=str(now.month))
-        ttk.Combobox(top, textvariable=self.month_var, values=[str(m) for m in range(1, 13)],
-                     width=4, state='readonly').pack(side='left', padx=4)
+        ttk.Combobox(top, textvariable=self.month_var, values=['全年'] + [str(m) for m in range(1, 13)],
+                     width=6, state='readonly').pack(side='left', padx=4)
         ttk.Button(top, text="查询", command=self.refresh).pack(side='left', padx=8)
         ttk.Button(top, text="导入Excel", command=self.import_excel).pack(side='right', padx=4)
         ttk.Button(top, text="导出Excel", command=self.export_excel).pack(side='right', padx=4)
@@ -7666,9 +7666,15 @@ class SalaryTab(ScrollableTab):
         self._load_bank_accounts()
         try:
             year = int(self.year_var.get())
-            month = int(self.month_var.get())
         except ValueError:
             return
+        month_sel = self.month_var.get()
+        is_full_year = (month_sel == '全年')
+        if not is_full_year:
+            try:
+                month = int(month_sel)
+            except ValueError:
+                return
 
         # 结算表
         for i in self.tree.get_children():
@@ -7676,11 +7682,18 @@ class SalaryTab(ScrollableTab):
         conn = get_db()
         emps = conn.execute("SELECT * FROM employees ORDER BY id").fetchall()
         for e in emps:
-            paid = conn.execute("""SELECT COALESCE(SUM(amount),0) s FROM salary_payments
-                                   WHERE employee_id=? AND year=? AND month=?""",
-                                (e['id'], year, month)).fetchone()['s']
-            # 根据入职、离职、调薪记录计算当月应发薪资
-            total = get_monthly_salary(e['id'], year, month)
+            if is_full_year:
+                # 全年查询：汇总12个月
+                paid = conn.execute("""SELECT COALESCE(SUM(amount),0) s FROM salary_payments
+                                       WHERE employee_id=? AND year=?""",
+                                    (e['id'], year)).fetchone()['s']
+                total = sum(get_monthly_salary(e['id'], year, m) for m in range(1, 13))
+            else:
+                paid = conn.execute("""SELECT COALESCE(SUM(amount),0) s FROM salary_payments
+                                       WHERE employee_id=? AND year=? AND month=?""",
+                                    (e['id'], year, month)).fetchone()['s']
+                # 根据入职、离职、调薪记录计算当月应发薪资
+                total = get_monthly_salary(e['id'], year, month)
             unpaid = total - paid
             name = e['name']
             if e['resigned']:
@@ -7690,10 +7703,16 @@ class SalaryTab(ScrollableTab):
         # 发放记录
         for i in self.rec_tree.get_children():
             self.rec_tree.delete(i)
-        rows = conn.execute("""SELECT p.*, e.name, e.resigned FROM salary_payments p
-                               LEFT JOIN employees e ON p.employee_id=e.id
-                               WHERE p.year=? AND p.month=? ORDER BY p.id DESC""",
-                            (year, month)).fetchall()
+        if is_full_year:
+            rows = conn.execute("""SELECT p.*, e.name, e.resigned FROM salary_payments p
+                                   LEFT JOIN employees e ON p.employee_id=e.id
+                                   WHERE p.year=? ORDER BY p.month DESC, p.id DESC""",
+                                (year,)).fetchall()
+        else:
+            rows = conn.execute("""SELECT p.*, e.name, e.resigned FROM salary_payments p
+                                   LEFT JOIN employees e ON p.employee_id=e.id
+                                   WHERE p.year=? AND p.month=? ORDER BY p.id DESC""",
+                                (year, month)).fetchall()
         conn.close()
         for r in rows:
             name = r['name'] or '(已删除)'
@@ -8644,7 +8663,8 @@ class StatsTab(ScrollableTab):
             ws['A1'].alignment = CENTER
             ws.row_dimensions[1].height = 26
             ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
-            ws['A2'] = f"统计年份：{year}年    导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            year_display = "全部" if is_all else f"{year}年"
+            ws['A2'] = f"统计年份：{year_display}    导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             ws['A2'].font = Font(name='微软雅黑', size=9, color='666666')
             ws['A2'].alignment = LEFT
             for c, h in enumerate(headers, 1):
